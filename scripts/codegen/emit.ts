@@ -1,0 +1,373 @@
+/**
+ * ACP-specific JSON Schema (2020-12) to Effect Schema emitter.
+ *
+ * Only the vocabulary used by the pinned ACP schemas is supported. Any other
+ * validation keyword fails generation with the affected definition named, so an
+ * upstream change can never silently widen what the codecs accept. Annotation
+ * keywords (and `x-*` extensions, which the source dialect ignores) are skipped.
+ */
+import type { JsonSchemaDocument, Manifest, ManifestInput } from "./inputs.ts"
+import { overrides as defaultOverrides, type Overrides } from "./overrides.ts"
+
+export class UnsupportedSchemaError extends Error {
+  constructor(readonly definition: string, readonly construct: string, detail?: string) {
+    super(`Unsupported JSON Schema construct "${construct}" in definition ${definition}${detail ? `: ${detail}` : ""}`)
+  }
+}
+
+const annotationKeywords = new Set([
+  "$schema",
+  "$comment",
+  "title",
+  "description",
+  "default",
+  "examples",
+  "deprecated",
+  "format", // annotation-only in the 2020-12 source dialect
+  "contentEncoding", // annotation-only in 2020-12
+  "discriminator" // OpenAPI hint; the variants themselves carry the constraint
+])
+
+const validationKeywords = new Set([
+  "$ref",
+  "type",
+  "const",
+  "enum",
+  "properties",
+  "required",
+  "additionalProperties",
+  "unevaluatedProperties",
+  "items",
+  "minItems",
+  "minimum",
+  "maximum",
+  "pattern",
+  "allOf",
+  "anyOf",
+  "oneOf",
+  "not"
+])
+
+const typeScoped: Record<string, ReadonlyArray<string>> = {
+  properties: ["object"],
+  required: ["object"],
+  additionalProperties: ["object"],
+  unevaluatedProperties: ["object"],
+  items: ["array"],
+  minItems: ["array"],
+  minimum: ["integer", "number"],
+  maximum: ["integer", "number"],
+  pattern: ["string"]
+}
+
+const reserved = new Set(["Schema", "W", "AcpSchema", "version", "provenance", "agentMethods", "clientMethods", "protocolMethods"])
+
+type Json = null | boolean | number | string | ReadonlyArray<Json> | { readonly [key: string]: Json }
+type Node = { readonly [key: string]: Json }
+
+interface Emitted {
+  readonly ts: string
+  readonly schema: string
+}
+
+const isNode = (u: unknown): u is Node => typeof u === "object" && u !== null && !Array.isArray(u)
+const str = (u: unknown) => JSON.stringify(u)
+const indent = (s: string, by = "  ") => s.split("\n").join(`\n${by}`)
+const propertyKey = (k: string) => (/^[A-Za-z_$][\w$]*$/.test(k) ? k : str(k))
+
+class Emitter {
+  constructor(readonly definitions: Readonly<Record<string, unknown>>, readonly definition: string) {}
+
+  fail(construct: string, detail?: string): never {
+    throw new UnsupportedSchemaError(this.definition, construct, detail)
+  }
+
+  node(input: unknown): Emitted {
+    if (input === true) return { ts: "unknown", schema: "Schema.Unknown" }
+    if (!isNode(input)) return this.fail(str(input), "schema must be an object or true")
+    for (const key of Object.keys(input)) {
+      if (key.startsWith("x-") || annotationKeywords.has(key)) continue
+      if (!validationKeywords.has(key)) this.fail(key)
+    }
+    const types = input.type === undefined ? undefined : (Array.isArray(input.type) ? input.type : [input.type]) as ReadonlyArray<string>
+    for (const [keyword, applicable] of Object.entries(typeScoped)) {
+      if (keyword in input && !(types?.some((t) => applicable.includes(t)) ?? false)) {
+        this.fail(keyword, `requires an explicit ${applicable.join("/")} type`)
+      }
+    }
+    if ("unevaluatedProperties" in input && input.unevaluatedProperties !== true) this.fail("unevaluatedProperties")
+
+    const parts: Array<Emitted> = []
+    const base = this.base(input, types)
+    if (base) parts.push(base)
+    if (typeof input.$ref === "string") parts.push(this.ref(input.$ref))
+    if (input.allOf !== undefined) for (const member of this.list(input.allOf, "allOf")) parts.push(this.node(member))
+    if (input.anyOf !== undefined) parts.push(this.union(this.list(input.anyOf, "anyOf"), "anyOf"))
+    if (input.oneOf !== undefined) parts.push(this.union(this.list(input.oneOf, "oneOf"), "oneOf"))
+
+    let result: Emitted = parts.length === 0
+      ? { ts: "unknown", schema: "Schema.Unknown" }
+      : parts.length === 1
+      ? parts[0]!
+      : { ts: parts.map((p) => `(${p.ts})`).join(" & "), schema: `W.allOf(\n  ${parts.map((p) => indent(p.schema)).join(",\n  ")}\n)` }
+    if (input.not !== undefined) {
+      const excluded = this.node(input.not)
+      result = { ts: result.ts, schema: `W.not(\n  ${indent(result.schema)},\n  ${indent(excluded.schema)}\n)` }
+    }
+    return result
+  }
+
+  list(u: Json | undefined, keyword: string): ReadonlyArray<Json> {
+    if (!Array.isArray(u) || u.length === 0) this.fail(keyword, "expected a non-empty array")
+    return u as ReadonlyArray<Json>
+  }
+
+  ref(ref: string): Emitted {
+    const match = /^#\/\$defs\/([A-Za-z_][\w]*)$/.exec(ref)
+    if (!match || !(match[1]! in this.definitions)) this.fail("$ref", ref)
+    return { ts: match![1]!, schema: match![1]! }
+  }
+
+  union(members: ReadonlyArray<Json>, mode: "anyOf" | "oneOf"): Emitted {
+    const emitted = members.map((m) => this.node(m))
+    if (emitted.length === 1) return emitted[0]!
+    return {
+      ts: emitted.map((e) => `(${e.ts})`).join(" | "),
+      schema: `Schema.Union([\n  ${emitted.map((e) => indent(e.schema)).join(",\n  ")}\n]${mode === "oneOf" ? `, { mode: "oneOf" }` : ""})`
+    }
+  }
+
+  base(input: Node, types: ReadonlyArray<string> | undefined): Emitted | undefined {
+    if (input.const !== undefined || input.enum !== undefined) {
+      const values = input.const !== undefined ? [input.const] : this.list(input.enum, "enum")
+      for (const v of values) {
+        if (v !== null && typeof v === "object") this.fail("const", "only primitive constants are supported")
+        if (types && !types.includes(v === null ? "null" : Number.isInteger(v) && types.includes("integer") ? "integer" : typeof v)) {
+          this.fail("const", `constant ${str(v)} contradicts type ${str(input.type)}`)
+        }
+      }
+      return {
+        ts: values.map(str).join(" | "),
+        schema: values.length === 1 ? `Schema.Literal(${str(values[0])})` : `Schema.Literals([${values.map(str).join(", ")}])`
+      }
+    }
+    if (!types) return undefined
+    const branches = types.map((t) => this.typed(input, t))
+    return branches.length === 1 ? branches[0] : {
+      ts: branches.map((b) => b.ts).join(" | "),
+      schema: `Schema.Union([${branches.map((b) => b.schema).join(", ")}])`
+    }
+  }
+
+  typed(input: Node, type: string): Emitted {
+    switch (type) {
+      case "null":
+        return { ts: "null", schema: "Schema.Null" }
+      case "boolean":
+        return { ts: "boolean", schema: "Schema.Boolean" }
+      case "string": {
+        const checks = typeof input.pattern === "string" ? [`Schema.isPattern(new RegExp(${str(input.pattern)}, "u"))`] : []
+        return { ts: "string", schema: withChecks("Schema.String", checks) }
+      }
+      case "integer":
+      case "number": {
+        const checks: Array<string> = []
+        if (input.minimum !== undefined) checks.push(`Schema.isGreaterThanOrEqualTo(${this.number(input.minimum, "minimum")})`)
+        if (input.maximum !== undefined) checks.push(`Schema.isLessThanOrEqualTo(${this.number(input.maximum, "maximum")})`)
+        return { ts: "number", schema: withChecks(type === "integer" ? "W.integer" : "Schema.Finite", checks) }
+      }
+      case "array": {
+        const item = input.items === undefined ? { ts: "unknown", schema: "Schema.Unknown" } : this.node(input.items)
+        const checks = input.minItems !== undefined ? [`Schema.isMinLength(${this.number(input.minItems, "minItems")})`] : []
+        return { ts: `ReadonlyArray<${item.ts}>`, schema: withChecks(`Schema.Array(${item.schema})`, checks) }
+      }
+      case "object":
+        return this.object(input)
+      default:
+        return this.fail("type", str(type))
+    }
+  }
+
+  number(u: Json | undefined, keyword: string): number {
+    if (typeof u !== "number" || !Number.isFinite(u)) this.fail(keyword, "expected a finite number")
+    return u as number
+  }
+
+  object(input: Node): Emitted {
+    const properties = input.properties ?? {}
+    if (!isNode(properties)) this.fail("properties", "expected an object")
+    const required = new Set<string>((input.required ?? []) as ReadonlyArray<string>)
+    const keys = [...new Set([...Object.keys(properties), ...required])]
+    const additional = input.additionalProperties
+    if (additional !== undefined && additional !== true) {
+      if (keys.length > 0) this.fail("additionalProperties", "a constrained additionalProperties alongside declared properties")
+      const value = this.node(additional)
+      return { ts: `{ readonly [key: string]: ${value.ts} }`, schema: `W.record(${value.schema})` }
+    }
+    if (keys.length === 0) return { ts: "{ readonly [key: string]: unknown }", schema: "W.object({})" }
+    const fields = keys.map((key) => {
+      const value = key in properties ? this.node(properties[key]) : { ts: "unknown", schema: "Schema.Unknown" }
+      const optional = !required.has(key)
+      return {
+        ts: `${docComment(properties[key])}readonly ${propertyKey(key)}${optional ? "?" : ""}: ${value.ts}`,
+        schema: `${propertyKey(key)}: ${optional ? `Schema.optionalKey(${value.schema})` : value.schema}`
+      }
+    })
+    return {
+      ts: `{\n  ${fields.map((f) => indent(f.ts)).join("\n  ")}\n}`,
+      schema: `W.object({\n  ${fields.map((f) => indent(f.schema)).join(",\n  ")}\n})`
+    }
+  }
+}
+
+const withChecks = (schema: string, checks: ReadonlyArray<string>) =>
+  checks.length === 0 ? schema : `${schema}.check(${checks.join(", ")})`
+
+const docComment = (node: Json | undefined, prefix = ""): string => {
+  const description = isNode(node) && typeof node.description === "string" ? node.description.trim() : ""
+  if (!description) return ""
+  const body = description.replaceAll("*/", "*\\/").split("\n").map((l) => `${prefix} *${l ? ` ${l}` : ""}`).join("\n")
+  return `/**\n${body}\n${prefix} */\n${prefix}`
+}
+
+/** Dependency order of definitions; alphabetical among independent ones. */
+const orderDefinitions = (definitions: Readonly<Record<string, unknown>>): ReadonlyArray<string> => {
+  const deps = new Map<string, Set<string>>()
+  for (const name of Object.keys(definitions)) {
+    const refs = new Set<string>()
+    for (const [, target] of JSON.stringify(definitions[name]).matchAll(/"#\/\$defs\/([\w]+)"/g)) refs.add(target!)
+    deps.set(name, refs)
+  }
+  const ordered: Array<string> = []
+  const state = new Map<string, "visiting" | "done">()
+  const visit = (name: string, path: ReadonlyArray<string>) => {
+    if (state.get(name) === "done") return
+    if (state.get(name) === "visiting") throw new UnsupportedSchemaError(name, "$ref", `recursive reference ${[...path, name].join(" -> ")}`)
+    state.set(name, "visiting")
+    for (const dep of [...deps.get(name)!].sort()) visit(dep, [...path, name])
+    state.set(name, "done")
+    ordered.push(name)
+  }
+  for (const name of Object.keys(definitions).sort()) visit(name, [])
+  return ordered
+}
+
+interface MethodEntry {
+  readonly method: string
+  readonly side: "agent" | "client" | "protocol"
+  params?: string
+  result?: string
+  kind?: "request" | "notification"
+}
+
+const envelopeRefs = (definitions: Readonly<Record<string, unknown>>, name: string): ReadonlySet<string> => {
+  const def = definitions[name]
+  if (def === undefined) throw new UnsupportedSchemaError(name, "$defs", "missing JSON-RPC envelope definition")
+  return new Set([...JSON.stringify(def).matchAll(/"#\/\$defs\/([\w]+)"/g)].map((m) => m[1]!))
+}
+
+/** Derives method declarations from `x-method`/`x-side` plus the envelope unions. */
+const collectMethods = (definitions: Readonly<Record<string, unknown>>): ReadonlyArray<MethodEntry> => {
+  const requests = new Set([...envelopeRefs(definitions, "ClientRequest"), ...envelopeRefs(definitions, "AgentRequest")])
+  const results = new Set([...envelopeRefs(definitions, "AgentResponse"), ...envelopeRefs(definitions, "ClientResponse")])
+  const notifications = new Set([
+    ...envelopeRefs(definitions, "ClientNotification"),
+    ...envelopeRefs(definitions, "AgentNotification")
+  ])
+  const methods = new Map<string, MethodEntry>()
+  for (const name of Object.keys(definitions).sort()) {
+    const def = definitions[name]
+    if (!isNode(def) || typeof def["x-method"] !== "string") continue
+    const side = def["x-side"]
+    if (side !== "agent" && side !== "client" && side !== "protocol") {
+      throw new UnsupportedSchemaError(name, "x-side", str(side))
+    }
+    const key = `${side} ${def["x-method"]}`
+    const entry = methods.get(key) ?? { method: def["x-method"], side }
+    methods.set(key, entry)
+    const role = requests.has(name) ? "params" : results.has(name) ? "result" : notifications.has(name) || side === "protocol" ? "notification" : undefined
+    if (role === undefined) throw new UnsupportedSchemaError(name, "x-method", "not referenced by any JSON-RPC envelope")
+    if (role === "result") {
+      entry.result = name
+    } else {
+      if (entry.params) throw new UnsupportedSchemaError(name, "x-method", `duplicate params for ${entry.method}`)
+      entry.params = name
+      entry.kind = role === "params" ? "request" : "notification"
+    }
+  }
+  for (const entry of methods.values()) {
+    if (!entry.params || (entry.kind === "request") !== (entry.result !== undefined)) {
+      throw new UnsupportedSchemaError(entry.params ?? entry.result ?? entry.method, "x-method", `incomplete method ${entry.method}`)
+    }
+  }
+  return [...methods.values()]
+}
+
+export interface EmitOptions {
+  readonly manifest: Pick<Manifest, "generator" | "upstream">
+  readonly input: ManifestInput
+  readonly overrides?: Overrides
+}
+
+/** Emits the complete TypeScript module for one pinned schema input. */
+export const emitModule = (document: JsonSchemaDocument, options: EmitOptions): string => {
+  const { input, manifest } = options
+  const definitions = document.$defs
+  const overrides = (options.overrides ?? defaultOverrides)[input.version] ?? {}
+  for (const name of Object.keys(overrides)) {
+    if (!(name in definitions)) throw new Error(`Override for unknown definition ${name} in v${input.version}`)
+  }
+  const out: Array<string> = []
+  out.push(
+    `/**`,
+    ` * ACP v${input.version} ${input.surface} wire schemas and method declarations.`,
+    ` *`,
+    ` * GENERATED by scripts/codegen/generate.ts from ${input.path}. Do not edit;`,
+    ` * run \`bun run generate\` after updating scripts/codegen/manifest.json.`,
+    ` */`,
+    `import * as Schema from "effect/Schema"`,
+    `import * as AcpSchema from "../../AcpSchema.ts"`,
+    `import * as W from "../../internal/wire.ts"`,
+    ``,
+    `/** Protocol version described by this module. */`,
+    `export const version = ${input.version} as const`,
+    ``,
+    `/** Upstream inputs this module was generated from. */`,
+    `export const provenance = {`,
+    `  version: ${input.version},`,
+    `  surface: ${str(input.surface)},`,
+    `  source: ${str(input.path)},`,
+    `  sha256: ${str(input.sha256)},`,
+    `  repository: ${str(manifest.upstream.repository)},`,
+    `  revision: ${str(manifest.upstream.revision)},`,
+    `  generator: ${str(manifest.generator)}`,
+    `} as const`
+  )
+  for (const name of orderDefinitions(definitions)) {
+    if (reserved.has(name)) throw new UnsupportedSchemaError(name, "$defs", "definition name collides with a generated export")
+    const override = overrides[name]
+    const emitted = override ?? new Emitter(definitions, name).node(definitions[name])
+    const doc = docComment(definitions[name] as Json)
+    out.push(
+      ``,
+      override ? `// Reviewed override: ${override.reason.replaceAll("\n", " ")}` : "",
+      `${doc}export type ${name} = ${emitted.ts}`,
+      `export const ${name} = W.def<${name}>(${str(name)}, ${emitted.schema})`
+    )
+  }
+  const methods = collectMethods(definitions)
+  for (const side of ["agent", "client", "protocol"] as const) {
+    const handledBy = side === "protocol" ? "either peer" : `the ${side}`
+    out.push(``, `/** Methods handled by ${handledBy}. */`, `export const ${side}Methods = {`)
+    const entries = methods.filter((m) => m.side === side).sort((a, b) => a.method.localeCompare(b.method))
+    out.push(
+      entries.map((m) =>
+        m.kind === "request"
+          ? `  ${str(m.method)}: AcpSchema.request(${str(m.method)}, ${m.params}, ${m.result})`
+          : `  ${str(m.method)}: AcpSchema.notification(${str(m.method)}, ${m.params})`
+      ).join(",\n"),
+      `} as const`
+    )
+  }
+  return out.filter((line, i, all) => !(line === "" && all[i - 1] === "")).join("\n") + "\n"
+}

@@ -1,0 +1,23 @@
+{
+  "generator": "effect-acp-codegen/1",
+  "upstream": {
+    "repository": "https://github.com/agentclientprotocol/agent-client-protocol",
+    "revision": "d3c1dd78c5f25afbc37a755ebd1982b43dd97069"
+  },
+  "inputs": [
+    {
+      "version": 1,
+      "surface": "baseline",
+      "path": "repos/agent-client-protocol/schema/v1/schema.json",
+      "sha256": "3c17bd6385d90cf672d8a661fddc359d73422cf8b8ce6865213d25cfd4c0eca7",
+      "output": "src/protocol/v1/Schema.ts"
+    },
+    {
+      "version": 2,
+      "surface": "baseline",
+      "path": "repos/agent-client-protocol/schema/v2/schema.json",
+      "sha256": "3df13661962bf9ed3162a3e50d75fab3d768247995bfb1754b0d844ae139ce4c",
+      "output": "src/protocol/v2/Schema.ts"
+    }
+  ]
+}
