@@ -1,0 +1,35 @@
+{
+  "name": "@agentclientprotocol/schema",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The Agent Client Protocol (ACP) is a protocol that standardizes communication between *code editors* (interactive programs for viewing and editing source code) and *coding agents* (programs that use generative AI to autonomously modify code).",
+  "homepage": "https://github.com/agentclientprotocol/agent-client-protocol#readme",
+  "bugs": {
+    "url": "https://github.com/agentclientprotocol/agent-client-protocol/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agentclientprotocol/agent-client-protocol.git"
+  },
+  "license": "Apache-2.0",
+  "author": "Zed Industries",
+  "type": "module",
+  "scripts": {
+    "generate:json-schema": "cargo run -p schema-generator",
+    "generate:json-schema:unstable": "cargo run -p schema-generator --features unstable",
+    "generate:json-schema:v2": "cargo run -p schema-generator --features unstable_protocol_v2",
+    "generate:json-schema:v2-unstable": "cargo run -p schema-generator --features unstable,unstable_protocol_v2",
+    "generate": "npm run generate:json-schema && npm run generate:json-schema:unstable && npm run generate:json-schema:v2 && npm run generate:json-schema:v2-unstable && npm run format",
+    "format": "prettier --write --log-level warn . && cargo fmt",
+    "format:check": "prettier --check . && cargo fmt -- --check",
+    "spellcheck": "./scripts/spellcheck.sh",
+    "spellcheck:fix": "./scripts/spellcheck.sh --write-changes",
+    "generate:registry": "python3 scripts/generate_registry_docs.py",
+    "check": "cargo clippy && cargo clippy -p agent-client-protocol-schema --all-targets --no-default-features --features unstable,unstable_protocol_v2,tracing && cargo clippy --all-targets --all-features && npm run format:check && npm run spellcheck && cargo test --all-features",
+    "docs": "cd docs && npx mint dev"
+  },
+  "devDependencies": {
+    "mint": "^4.2.887",
+    "prettier": "^3.9.6"
+  }
+}
