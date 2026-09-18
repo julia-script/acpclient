@@ -3,9 +3,16 @@
   "module": "src/index.ts",
   "type": "module",
   "devDependencies": {
+    "@effect/tsgo": "^0.45.0",
     "@types/bun": "latest"
   },
   "peerDependencies": {
     "typescript": "^7"
+  },
+  "scripts": {
+    "prepare": "effect-tsgo patch"
+  },
+  "dependencies": {
+    "effect": "4.0.0-rc.115"
   }
 }

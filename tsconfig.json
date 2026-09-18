@@ -8,6 +8,7 @@
     "jsx": "react-jsx",
     "allowJs": true,
     "types": ["bun"],
+    "plugins": [{ "name": "@effect/language-service" }],
 
     // Bundler mode
     "moduleResolution": "bundler",
@@ -26,5 +27,6 @@
     "noUnusedLocals": false,
     "noUnusedParameters": false,
     "noPropertyAccessFromIndexSignature": false
-  }
+  },
+  "exclude": ["repos", "node_modules"]
 }
