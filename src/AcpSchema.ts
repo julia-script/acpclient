@@ -5,17 +5,16 @@
  * Versioned payload schemas live in `effect-acp/protocol/v1` and
  * `effect-acp/protocol/v2`.
  *
- * @since 0.1.0
  */
 import * as Schema from "effect/Schema"
-import * as W from "./internal/wire.ts"
+import * as Wire from "./internal/wire.ts"
 
 /**
  * A JSON-RPC request identifier. Distinct from session, message, and
  * application identifiers.
  */
 export type RequestId = string | number | null
-export const RequestId: Schema.Codec<RequestId> = Schema.Union([Schema.String, W.integer, Schema.Null])
+export const RequestId: Schema.Codec<RequestId> = Schema.Union([Schema.String, Wire.integer, Schema.Null])
 
 /** Standard JSON-RPC and ACP error codes. */
 export const ErrorCode = {
@@ -35,13 +34,12 @@ export interface ErrorObject {
   readonly message: string
   readonly data?: unknown
 }
-export const ErrorObject: Schema.Codec<ErrorObject> = W.def<ErrorObject>(
-  "ErrorObject",
-  W.object({ code: W.integer, message: Schema.String, data: Schema.optionalKey(Schema.Unknown) })
-)
+export const ErrorObject: Schema.Codec<ErrorObject> = Wire.object({
+  code: Wire.integer, message: Schema.String, data: Schema.optionalKey(Schema.Unknown)
+}).annotate({ identifier: "ErrorObject" })
 
 /** A request method: params are sent, a result (or error) comes back. */
-export interface RequestMethod<M extends string = string, P = any, R = any> {
+export interface RequestMethod<M extends string = string, P = unknown, R = unknown> {
   readonly _tag: "Request"
   readonly method: M
   readonly params: Schema.Codec<P>
@@ -49,7 +47,7 @@ export interface RequestMethod<M extends string = string, P = any, R = any> {
 }
 
 /** A notification method: params are sent and never answered. */
-export interface NotificationMethod<M extends string = string, P = any> {
+export interface NotificationMethod<M extends string = string, P = unknown> {
   readonly _tag: "Notification"
   readonly method: M
   readonly params: Schema.Codec<P>

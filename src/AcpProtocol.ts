@@ -1,3 +1,4 @@
+import { AcpTransport } from "./AcpTransport.ts"
 /**
  * Protocol version policy, initialization, and version selection.
  *
@@ -6,7 +7,6 @@
  * Enabling v2 enables only its baseline: nothing beyond the supplied
  * `initialize` params is advertised.
  *
- * @since 0.1.0
  */
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
@@ -58,7 +58,7 @@ export type Negotiated =
 
 export type InitializeError = AcpRequestError | AcpTimeoutError | AcpUnsupportedVersion
 
-const initialized = new WeakSet<AcpConnection.AcpConnection>()
+const initialized = new WeakSet<AcpConnection.Service>()
 
 /**
  * Sends `initialize` with the highest enabled version and selects the version
@@ -66,7 +66,7 @@ const initialized = new WeakSet<AcpConnection.AcpConnection>()
  * A connection is initialized at most once, even if the attempt fails.
  */
 export const initialize = (
-  connection: AcpConnection.AcpConnection,
+  connection: AcpConnection.Service,
   options: InitializeOptions
 ): Effect.Effect<Negotiated, InitializeError> =>
   Effect.gen(function*() {
@@ -76,25 +76,23 @@ export const initialize = (
     initialized.add(connection)
     const enabled: ReadonlyArray<Version> = options.versions ?? defaultVersions
     if (enabled.length === 0 || !enabled.every((v) => v === 1 || v === 2)) {
-      return yield* new AcpProtocolError({ message: `Invalid version policy ${JSON.stringify(enabled)}` })
+      return yield* new AcpProtocolError({ message: "Invalid version policy" })
     }
-    const offered = Math.max(...enabled) as Version
-    const params = yield* Schema.encodeUnknownEffect(schemas[offered].InitializeRequest)({
-      ...options.params,
-      protocolVersion: offered
-    }).pipe(Effect.mapError((error) => new AcpProtocolError({ message: `Invalid initialize params: ${error.message}` })))
-    const raw = yield* connection.requestRaw("initialize", params, { timeout: options.timeout })
-    const received = (raw as { readonly protocolVersion?: unknown } | null)?.protocolVersion
+    const offered = enabled.includes(2) ? 2 : 1
+    const input = { ...options.params, protocolVersion: offered }
+    const invalidParams = (error: Schema.SchemaError) => new AcpProtocolError({ message: `Invalid initialize params: ${error.message}` })
+    const advertised: Advertised = offered === 2
+      ? { version: 2, params: yield* Schema.encodeUnknownEffect(V2.InitializeRequest)(input).pipe(Effect.mapError(invalidParams)) }
+      : { version: 1, params: yield* Schema.encodeUnknownEffect(V1.InitializeRequest)(input).pipe(Effect.mapError(invalidParams)) }
+    const raw = yield* connection.requestRaw("initialize", advertised.params, { timeout: options.timeout })
+    const received = typeof raw === "object" && raw !== null && "protocolVersion" in raw ? raw.protocolVersion : undefined
     const version = enabled.find((v) => v === received)
     if (version === undefined) {
       return yield* new AcpUnsupportedVersion({ requested: offered, received, supported: [...enabled] })
     }
-    const response = yield* Schema.decodeUnknownEffect(schemas[version].InitializeResponse)(raw).pipe(
-      Effect.mapError((error) =>
-        new AcpProtocolError({ message: `Invalid v${version} initialize response: ${error.message}`, cause: error })
-      )
-    )
-    return { version, advertised: { version: offered, params }, response } as Negotiated
+    const invalidResponse = (error: Schema.SchemaError) => new AcpProtocolError({ message: `Invalid v${version} initialize response: ${error.message}`, cause: error })
+    if (version === 2) return { version, advertised, response: yield* Schema.decodeUnknownEffect(V2.InitializeResponse)(raw).pipe(Effect.mapError(invalidResponse)) }
+    return { version, advertised, response: yield* Schema.decodeUnknownEffect(V1.InitializeResponse)(raw).pipe(Effect.mapError(invalidResponse)) }
   })
 
 export type ConnectOptions = InitializeOptions & {
@@ -104,7 +102,7 @@ export type ConnectOptions = InitializeOptions & {
 }
 
 export interface Connected {
-  readonly connection: AcpConnection.AcpConnection
+  readonly connection: AcpConnection.Service
   readonly negotiated: Negotiated
 }
 
@@ -121,7 +119,7 @@ export const connect = (
     return yield* Effect.gen(function*() {
       const connector = yield* AcpConnector
       const transport = yield* connector.connect
-      const connection = yield* AcpConnection.make(transport, options.connection)
+      const connection = yield* AcpConnection.make(options.connection).pipe(Effect.provideService(AcpTransport, transport))
       const negotiated = yield* initialize(connection, options)
       yield* connection.setHandlers(options.handlers?.(negotiated) ?? {})
       return { connection, negotiated }

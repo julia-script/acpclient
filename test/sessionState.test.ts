@@ -1,0 +1,583 @@
+/**
+ * Pure reducer behavior: v2 patch/chunk/replacement semantics, v1 adaptation,
+ * submission lifecycles, and retention bounds. No transport is involved, so
+ * these pin the interpretation rules on their own.
+ */
+import { describe, expect, test } from "bun:test"
+import { defaultContentLimits, type SubmissionSnapshot } from "../src/AcpApp.ts"
+import * as State from "../src/AcpSessionState.ts"
+
+const v2 = () => State.empty("sess-1", 2)
+const v1 = () => State.empty("sess-1", 1)
+
+const update = (update: unknown): State.Event => ({ _tag: "update", update })
+const text = (value: string) => ({ type: "text", text: value })
+
+const submission = (id: string, overrides: Partial<SubmissionSnapshot> = {}): SubmissionSnapshot => ({
+  id,
+  prompt: [text("hi")],
+  status: { _tag: "pending" },
+  requestId: null,
+  agentMessageId: null,
+  acceptanceUnavailable: false,
+  foreground: "inferred",
+  ...overrides
+})
+
+describe("v2 messages", () => {
+  test("chunks append in order under one message id", () => {
+    const next = State.reduceAll(v2(), [
+      update({ sessionUpdate: "agent_message_chunk", messageId: "m-1", content: text("a") }),
+      update({ sessionUpdate: "agent_message_chunk", messageId: "m-1", content: text("b") })
+    ])
+    expect(next.messages).toHaveLength(1)
+    expect(next.messages[0]!.content).toEqual([text("a"), text("b")])
+    expect(next.messages[0]!.provenance).toEqual({ _tag: "agent", agentId: "m-1" })
+  })
+
+  // Spec: "Replace accumulated chunks".
+  test("a whole-message update replaces prior chunks, then later chunks append", () => {
+    const next = State.reduceAll(v2(), [
+      update({ sessionUpdate: "agent_message_chunk", messageId: "m-1", content: text("draft") }),
+      update({ sessionUpdate: "agent_message", messageId: "m-1", content: [text("final")] }),
+      update({ sessionUpdate: "agent_message_chunk", messageId: "m-1", content: text("!") })
+    ])
+    expect(next.messages).toHaveLength(1)
+    expect(next.messages[0]!.content).toEqual([text("final"), text("!")])
+  })
+
+  test("an explicit null content clears the message", () => {
+    const next = State.reduceAll(v2(), [
+      update({ sessionUpdate: "agent_message_chunk", messageId: "m-1", content: text("a") }),
+      update({ sessionUpdate: "agent_message", messageId: "m-1", content: null })
+    ])
+    expect(next.messages[0]!.content).toEqual([])
+  })
+
+  test("distinct message ids are distinct messages", () => {
+    const next = State.reduceAll(v2(), [
+      update({ sessionUpdate: "agent_message_chunk", messageId: "m-1", content: text("a") }),
+      update({ sessionUpdate: "agent_message_chunk", messageId: "m-2", content: text("b") })
+    ])
+    expect(next.messages.map((message) => message.id)).toEqual(["m-1", "m-2"])
+  })
+
+  test("user, agent, and thought messages keep their kinds", () => {
+    const next = State.reduceAll(v2(), [
+      update({ sessionUpdate: "user_message", messageId: "u-1", content: [text("q")] }),
+      update({ sessionUpdate: "agent_message", messageId: "a-1", content: [text("r")] }),
+      update({ sessionUpdate: "agent_thought", messageId: "t-1", content: [text("hmm")] })
+    ])
+    expect(next.messages.map((message) => message.kind)).toEqual(["user", "agent", "thought"])
+  })
+})
+
+describe("v2 tool calls", () => {
+  test("omitted fields are unchanged, null clears, values replace", () => {
+    const seeded = State.reduce(
+      v2(),
+      update({
+        sessionUpdate: "tool_call_update",
+        toolCallId: "t-1",
+        title: "Edit",
+        name: "edit_file",
+        status: "pending",
+        rawInput: { path: "a.ts" }
+      })
+    )
+    const next = State.reduce(
+      seeded,
+      // `title` omitted, `name` explicitly cleared, `status` replaced.
+      update({ sessionUpdate: "tool_call_update", toolCallId: "t-1", name: null, status: "completed" })
+    )
+    const call = next.toolCalls["t-1"]!
+    expect(call.title).toBe("Edit")
+    expect(call.name).toBeNull()
+    expect(call.status).toBe("completed")
+    expect(call.rawInput).toEqual({ path: "a.ts" })
+  })
+
+  test("content chunks append to the tool call", () => {
+    const next = State.reduceAll(v2(), [
+      update({ sessionUpdate: "tool_call_update", toolCallId: "t-1", title: "Run" }),
+      update({ sessionUpdate: "tool_call_content_chunk", toolCallId: "t-1", content: { type: "content", content: text("1") } }),
+      update({ sessionUpdate: "tool_call_content_chunk", toolCallId: "t-1", content: { type: "content", content: text("2") } })
+    ])
+    expect(next.toolCalls["t-1"]!.content).toHaveLength(2)
+  })
+
+  test("a full content update replaces accumulated chunks", () => {
+    const next = State.reduceAll(v2(), [
+      update({ sessionUpdate: "tool_call_content_chunk", toolCallId: "t-1", content: { type: "content", content: text("1") } }),
+      update({ sessionUpdate: "tool_call_update", toolCallId: "t-1", content: [{ type: "content", content: text("final") }] })
+    ])
+    expect(next.toolCalls["t-1"]!.content).toEqual([{ type: "content", content: text("final") }])
+  })
+})
+
+describe("v2 terminals", () => {
+  const base64 = (value: string) => btoa(value)
+
+  // Spec: "Terminal snapshot and byte chunks".
+  test("a replacement snapshot replaces output, then chunks append decoded bytes", () => {
+    const next = State.reduceAll(v2(), [
+      update({ sessionUpdate: "terminal_output_chunk", terminalId: "term-1", data: base64("stale") }),
+      update({ sessionUpdate: "terminal_update", terminalId: "term-1", command: "ls", output: { data: base64("A") } }),
+      update({ sessionUpdate: "terminal_output_chunk", terminalId: "term-1", data: base64("B") }),
+      update({ sessionUpdate: "terminal_output_chunk", terminalId: "term-1", data: base64("C") })
+    ])
+    const terminal = next.terminals["term-1"]!
+    expect(String.fromCharCode(...terminal.outputBytes)).toBe("ABC")
+    expect(terminal.command).toBe("ls")
+  })
+
+  test("each chunk is decoded independently, not as concatenated base64", () => {
+    // "a" and "b" each encode to 4 base64 chars with padding; concatenating
+    // the text before decoding would produce garbage rather than "ab".
+    const next = State.reduceAll(v2(), [
+      update({ sessionUpdate: "terminal_output_chunk", terminalId: "term-1", data: base64("a") }),
+      update({ sessionUpdate: "terminal_output_chunk", terminalId: "term-1", data: base64("b") })
+    ])
+    expect(String.fromCharCode(...next.terminals["term-1"]!.outputBytes)).toBe("ab")
+  })
+
+  test("exit status marks the terminal exited", () => {
+    const next = State.reduce(
+      v2(),
+      update({ sessionUpdate: "terminal_update", terminalId: "term-1", exitStatus: { exitCode: 3, signal: null } })
+    )
+    expect(next.terminals["term-1"]!.exitCode).toBe(3)
+  })
+
+  // Spec: "Transcript exceeds retained-content budget".
+  test("output beyond the byte budget is truncated and reported", () => {
+    const limits = { ...defaultContentLimits, terminalBytes: 4 }
+    const next = State.reduceAll(
+      v2(),
+      [
+        update({ sessionUpdate: "terminal_output_chunk", terminalId: "term-1", data: base64("abcd") }),
+        update({ sessionUpdate: "terminal_output_chunk", terminalId: "term-1", data: base64("ef") })
+      ],
+      limits
+    )
+    const terminal = next.terminals["term-1"]!
+    expect(terminal.outputBytes).toHaveLength(4)
+    expect(String.fromCharCode(...terminal.outputBytes)).toBe("cdef")
+    expect(terminal.outputTruncated).toBe(true)
+    expect(next.truncated.terminals).toEqual(["term-1"])
+  })
+})
+
+describe("v2 plans, commands, config, usage, info", () => {
+  test("a plan update replaces its entries by plan id", () => {
+    const next = State.reduceAll(v2(), [
+      update({ sessionUpdate: "plan_update", plan: { type: "items", planId: "p-1", entries: [{ content: "one", priority: "high", status: "pending" }] } }),
+      update({ sessionUpdate: "plan_update", plan: { type: "items", planId: "p-1", entries: [{ content: "two", priority: "low", status: "completed" }] } })
+    ])
+    expect(next.plans["p-1"]!.entries).toEqual([{ content: "two", priority: "low", status: "completed" }])
+  })
+
+  test("an unknown plan variant stays observable without inventing entries", () => {
+    const next = State.reduce(
+      v2(),
+      update({ sessionUpdate: "plan_update", plan: { type: "_custom", planId: "p-9" } })
+    )
+    expect(next.plans["p-9"]!.entries).toBeNull()
+    expect(next.plans["p-9"]!.variant).toEqual({ type: "_custom", planId: "p-9" })
+  })
+
+  test("available commands are replaced wholesale", () => {
+    const next = State.reduceAll(v2(), [
+      update({ sessionUpdate: "available_commands_update", availableCommands: [{ name: "a", description: "" }] }),
+      update({ sessionUpdate: "available_commands_update", availableCommands: [{ name: "b", description: "" }] })
+    ])
+    expect(next.commands.map((command) => command.name)).toEqual(["b"])
+  })
+
+  test("v2 config options key on configId and replace the whole set", () => {
+    const next = State.reduceAll(v2(), [
+      update({ sessionUpdate: "config_option_update", configOptions: [{ configId: "model", name: "Model", type: "select", currentValue: "a", options: [{ value: "a", name: "A" }] }] }),
+      update({ sessionUpdate: "config_option_update", configOptions: [{ configId: "depth", name: "Depth", type: "boolean", currentValue: false }] })
+    ])
+    expect(Object.keys(next.config)).toEqual(["depth"])
+  })
+
+  test("usage and session info are projected", () => {
+    const next = State.reduceAll(v2(), [
+      update({ sessionUpdate: "usage_update", used: 10, size: 100, cost: { amount: 1, currency: "USD" } }),
+      update({ sessionUpdate: "session_info_update", title: "Fix bug", updatedAt: "2026-01-01T00:00:00Z" })
+    ])
+    expect(next.usage).toEqual({ used: 10, size: 100, cost: { amount: 1, currency: "USD" } })
+    expect(next.metadata.title).toBe("Fix bug")
+  })
+
+  test("session info null clears the title but omission keeps it", () => {
+    const next = State.reduceAll(v2(), [
+      update({ sessionUpdate: "session_info_update", title: "Set" }),
+      update({ sessionUpdate: "session_info_update", updatedAt: "later" }),
+      update({ sessionUpdate: "session_info_update", title: null })
+    ])
+    expect(next.metadata.updatedAt).toBe("later")
+    expect(next.metadata.title).toBeNull()
+  })
+})
+
+describe("raw updates and unknown variants", () => {
+  test("malformed known updates stay raw without creating projected records", () => {
+    const next = State.reduceAll(v2(), [
+      update({ sessionUpdate: "terminal_update", command: "missing terminal id" }),
+      update({ sessionUpdate: "tool_call_update", toolCallId: 12, title: "invalid id" }),
+      update({ sessionUpdate: "agent_message_chunk", content: text("missing message id") }),
+      update({ sessionUpdate: "usage_update", used: "invalid", size: 100 })
+    ])
+    expect(next.raw).toHaveLength(4)
+    expect(next.terminals).toEqual({})
+    expect(next.toolCalls).toEqual({})
+    expect(next.messages).toEqual([])
+    expect(next.usage).toBeNull()
+  })
+
+  test("every update is retained raw, including undecodable ones", () => {
+    const next = State.reduceAll(v2(), [
+      update({ sessionUpdate: "agent_message_chunk", messageId: "m-1", content: text("a") }),
+      update({ sessionUpdate: "_vendor/extension", anything: true }),
+      update("not an object")
+    ])
+    expect(next.raw.map((record) => record.kind)).toEqual([
+      "agent_message_chunk",
+      "_vendor/extension",
+      "undecodable"
+    ])
+    expect(next.raw.every((record) => record.version === 2)).toBe(true)
+  })
+
+  test("an unknown variant does not corrupt known state", () => {
+    const next = State.reduceAll(v2(), [
+      update({ sessionUpdate: "agent_message", messageId: "m-1", content: [text("kept")] }),
+      update({ sessionUpdate: "future_variant", messageId: "m-1", content: [] })
+    ])
+    expect(next.messages[0]!.content).toEqual([text("kept")])
+  })
+})
+
+describe("v1 adaptation", () => {
+  test("command input hints are adapted to the v2 text-input variant", () => {
+    const next = State.reduce(v1(), update({
+      sessionUpdate: "available_commands_update",
+      availableCommands: [{ name: "search", description: "Search files", input: { hint: "pattern" } }]
+    }))
+    expect(next.commands).toEqual([{
+      name: "search", description: "Search files", input: { type: "text", hint: "pattern" }
+    }])
+  })
+
+  // Spec: "Missing message ID during replay".
+  test("chunks without message ids get local identities, never agent ones", () => {
+    const next = State.reduceAll(v1(), [
+      update({ sessionUpdate: "agent_message_chunk", content: text("a") }),
+      update({ sessionUpdate: "agent_message_chunk", content: text("b") })
+    ])
+    expect(next.messages).toHaveLength(1)
+    expect(next.messages[0]!.provenance).toEqual({ _tag: "local" })
+    expect(next.messages[0]!.content).toEqual([text("a"), text("b")])
+  })
+
+  test("a role change starts a new local message rather than merging by content", () => {
+    const next = State.reduceAll(v1(), [
+      update({ sessionUpdate: "agent_message_chunk", content: text("same") }),
+      update({ sessionUpdate: "user_message_chunk", content: text("same") }),
+      update({ sessionUpdate: "agent_message_chunk", content: text("same") })
+    ])
+    // Identical text across roles must not be folded into one message.
+    expect(next.messages).toHaveLength(3)
+    expect(next.messages.map((message) => message.kind)).toEqual(["agent", "user", "agent"])
+    expect(new Set(next.messages.map((message) => message.id)).size).toBe(3)
+  })
+
+  test("tool_call introduces and tool_call_update merges, keeping agent tool ids", () => {
+    const next = State.reduceAll(v1(), [
+      update({ sessionUpdate: "tool_call", toolCallId: "t-1", title: "Edit", status: "pending" }),
+      update({ sessionUpdate: "tool_call_update", toolCallId: "t-1", status: "completed" })
+    ])
+    const call = next.toolCalls["t-1"]!
+    expect(call.title).toBe("Edit")
+    expect(call.status).toBe("completed")
+    expect(call.provenance).toEqual({ _tag: "agent", agentId: "t-1" })
+  })
+
+  test("v1 has a single implicit plan, marked local", () => {
+    const next = State.reduceAll(v1(), [
+      update({ sessionUpdate: "plan", entries: [{ content: "one", priority: "high", status: "pending" }] }),
+      update({ sessionUpdate: "plan", entries: [{ content: "two", priority: "low", status: "completed" }] })
+    ])
+    expect(Object.keys(next.plans)).toEqual(["local-plan"])
+    expect(next.plans["local-plan"]!.provenance).toEqual({ _tag: "local" })
+    expect(next.plans["local-plan"]!.entries).toHaveLength(1)
+  })
+
+  test("v1 config options key on id and modes surface under a reserved key", () => {
+    const next = State.reduceAll(v1(), [
+      update({ sessionUpdate: "config_option_update", configOptions: [{ id: "model", name: "Model", type: "select", currentValue: "a", options: [{ value: "a", name: "A" }] }] }),
+      update({ sessionUpdate: "current_mode_update", currentModeId: "architect" })
+    ])
+    expect(next.config["model"]).toBeDefined()
+    expect(next.config["acp/currentMode"]!.option).toMatchObject({ currentModeId: "architect" })
+  })
+
+  test("raw records carry the v1 version", () => {
+    const next = State.reduce(v1(), update({ sessionUpdate: "plan", entries: [] }))
+    expect(next.raw[0]!.version).toBe(1)
+  })
+})
+
+describe("submissions", () => {
+  test("v2 acceptance records the agent message id without completing foreground", () => {
+    const next = State.reduceAll(v2(), [
+      { _tag: "submissionRegistered", submission: submission("s-1") },
+      { _tag: "submissionDispatched", id: "s-1", requestId: 7 },
+      { _tag: "submissionAccepted", id: "s-1", agentMessageId: "m-1" }
+    ])
+    expect(next.submissions["s-1"]!.status).toEqual({ _tag: "accepted" })
+    expect(next.submissions["s-1"]!.agentMessageId).toBe("m-1")
+    // Acceptance is insertion only; foreground work is still outstanding.
+    expect(next.activeSubmissionId).toBe("s-1")
+  })
+
+  // Spec: "User update precedes acknowledgement".
+  test("a user update before the response does not duplicate on acceptance", () => {
+    const next = State.reduceAll(v2(), [
+      { _tag: "submissionRegistered", submission: submission("s-1") },
+      { _tag: "submissionDispatched", id: "s-1", requestId: 1 },
+      update({ sessionUpdate: "user_message", messageId: "m-1", content: [text("hi")] }),
+      { _tag: "submissionAccepted", id: "s-1", agentMessageId: "m-1" }
+    ])
+    expect(next.messages.filter((message) => message.id === "m-1")).toHaveLength(1)
+    expect(next.submissions["s-1"]!.agentMessageId).toBe("m-1")
+    expect(next.activeSubmissionId).toBe("s-1")
+  })
+
+  test("v2 foreground ends on the idle state update, not on acceptance", () => {
+    const next = State.reduceAll(v2(), [
+      { _tag: "submissionRegistered", submission: submission("s-1") },
+      { _tag: "submissionDispatched", id: "s-1", requestId: 1 },
+      { _tag: "submissionAccepted", id: "s-1", agentMessageId: "m-1" },
+      update({ sessionUpdate: "state_update", state: "idle", stopReason: "end_turn" })
+    ])
+    expect(next.activeSubmissionId).toBeNull()
+    expect(next.foreground).toEqual({ state: "idle", stopReason: "end_turn" })
+  })
+
+  test("agent-reported running is distinguishable from inferred running", () => {
+    // v1 has no `state_update` variant at all, so a running v1 session is
+    // only ever locally inferred from an outstanding prompt.
+    const inferred = State.reduceAll(v1(), [
+      { _tag: "submissionRegistered", submission: submission("s-1", { acceptanceUnavailable: true }) },
+      { _tag: "submissionDispatched", id: "s-1", requestId: 1 }
+    ])
+    expect(inferred.foreground).toEqual({ state: "running", provenance: "inferred" })
+
+    const reported = State.reduceAll(v2(), [
+      { _tag: "submissionRegistered", submission: submission("s-1") },
+      { _tag: "submissionDispatched", id: "s-1", requestId: 1 },
+      update({ sessionUpdate: "state_update", state: "running" })
+    ])
+    expect(reported.foreground).toEqual({ state: "running", provenance: "agent-reported" })
+  })
+
+  test("a v1 state_update is not interpreted, since v1 has no such variant", () => {
+    const next = State.reduce(v1(), update({ sessionUpdate: "state_update", state: "idle" }))
+    expect(next.foreground).toEqual({ state: "unknown" })
+    // It stays visible as a raw record rather than being silently discarded.
+    expect(next.raw[0]!.kind).toBe("state_update")
+  })
+
+  // Spec: "V1 prompt remains pending".
+  test("v1 completion comes from the prompt response and reports its stop reason", () => {
+    const next = State.reduceAll(v1(), [
+      { _tag: "submissionRegistered", submission: submission("s-1", { acceptanceUnavailable: true }) },
+      { _tag: "submissionDispatched", id: "s-1", requestId: 1 },
+      { _tag: "submissionCompleted", id: "s-1", stopReason: "end_turn" }
+    ])
+    expect(next.submissions["s-1"]!.acceptanceUnavailable).toBe(true)
+    expect(next.submissions["s-1"]!.agentMessageId).toBeNull()
+    expect(next.foreground).toEqual({ state: "idle", stopReason: "end_turn" })
+    expect(next.activeSubmissionId).toBeNull()
+  })
+
+  test("a failed submission releases the foreground and records why", () => {
+    const next = State.reduceAll(v2(), [
+      { _tag: "submissionRegistered", submission: submission("s-1") },
+      { _tag: "submissionFailed", id: "s-1", failure: { _tag: "timeout" } }
+    ])
+    expect(next.submissions["s-1"]!.status).toEqual({ _tag: "failed", failure: { _tag: "timeout" } })
+    expect(next.activeSubmissionId).toBeNull()
+  })
+
+  test("an unknown agent state is preserved verbatim as agent-reported", () => {
+    const next = State.reduce(v2(), update({ sessionUpdate: "state_update", state: "_vendor_waiting" }))
+    expect(next.foreground).toEqual({ state: "_vendor_waiting", provenance: "agent-reported" })
+  })
+})
+
+describe("interactions", () => {
+  const pending = {
+    interactionId: "permission-0",
+    kind: "permission" as const,
+    version: 2 as const,
+    status: "pending" as const,
+    request: { sessionId: "s", title: "Edit file", options: [{ optionId: "allow", name: "Allow", kind: "allow_once" }] },
+    outcome: null,
+    createdAt: 1,
+    resolvedAt: null
+  }
+
+  test("settling records the outcome and resolution point", () => {
+    const next = State.reduceAll(v2(), [
+      { _tag: "interactionCreated", interaction: pending },
+      { _tag: "interactionSettled", interactionId: "permission-0", status: "resolved", outcome: { outcome: { outcome: "selected", optionId: "allow" } } }
+    ])
+    const interaction = next.interactions["permission-0"]!
+    expect(interaction.status).toBe("resolved")
+    expect(interaction.outcome).toEqual({ outcome: { outcome: "selected", optionId: "allow" } })
+    expect(interaction.resolvedAt).toBe(next.seq)
+  })
+
+  // Spec: "Duplicate interaction response" — the reducer half of it.
+  test("a second settle does not overwrite the first", () => {
+    const next = State.reduceAll(v2(), [
+      { _tag: "interactionCreated", interaction: pending },
+      { _tag: "interactionSettled", interactionId: "permission-0", status: "resolved", outcome: { outcome: { outcome: "selected", optionId: "allow" } } },
+      { _tag: "interactionSettled", interactionId: "permission-0", status: "cancelled", outcome: { outcome: { outcome: "cancelled" } } }
+    ])
+    expect(next.interactions["permission-0"]!.outcome).toEqual({ outcome: { outcome: "selected", optionId: "allow" } })
+    expect(next.interactions["permission-0"]!.status).toBe("resolved")
+  })
+})
+
+describe("cancellation", () => {
+  // Spec: "Updates after cancel".
+  test("updates after a cancel request are applied and do not confirm cancellation", () => {
+    const next = State.reduceAll(v2(), [
+      { _tag: "submissionRegistered", submission: submission("s-1") },
+      { _tag: "submissionDispatched", id: "s-1", requestId: 1 },
+      { _tag: "cancelRequested" },
+      update({ sessionUpdate: "tool_call_update", toolCallId: "t-1", status: "completed" })
+    ])
+    expect(next.toolCalls["t-1"]!.status).toBe("completed")
+    // No completion signal yet, so foreground work is still outstanding.
+    expect(next.activeSubmissionId).toBe("s-1")
+
+    const confirmed = State.reduce(next, update({ sessionUpdate: "state_update", state: "idle", stopReason: "cancelled" }))
+    expect(confirmed.activeSubmissionId).toBeNull()
+  })
+})
+
+describe("retention bounds", () => {
+  test("messages beyond the budget are evicted oldest-first and reported", () => {
+    const limits = { ...defaultContentLimits, messages: 3 }
+    const next = State.reduceAll(
+      v2(),
+      Array.from({ length: 5 }, (_, index) =>
+        update({ sessionUpdate: "agent_message", messageId: `m-${index}`, content: [text(String(index))] })),
+      limits
+    )
+    expect(next.messages.map((message) => message.id)).toEqual(["m-2", "m-3", "m-4"])
+    expect(next.truncated.history).toBe(true)
+  })
+
+  test("tool calls, plans, and raw records are each bounded independently", () => {
+    const limits = { ...defaultContentLimits, toolCalls: 2, plans: 1, rawUpdates: 3 }
+    const next = State.reduceAll(
+      v2(),
+      [
+        ...Array.from({ length: 4 }, (_, index) => update({ sessionUpdate: "tool_call_update", toolCallId: `t-${index}` })),
+        ...Array.from({ length: 2 }, (_, index) =>
+          update({ sessionUpdate: "plan_update", plan: { type: "items", planId: `p-${index}`, entries: [] } }))
+      ],
+      limits
+    )
+    expect(Object.keys(next.toolCalls).sort()).toEqual(["t-2", "t-3"])
+    expect(Object.keys(next.plans)).toEqual(["p-1"])
+    expect(next.raw).toHaveLength(3)
+    expect(next.truncated).toMatchObject({ toolCalls: true, plans: true, raw: true })
+  })
+
+  test("pending interactions are never evicted by the interaction budget", () => {
+    const limits = { ...defaultContentLimits, interactions: 1 }
+    const next = State.reduceAll(
+      v2(),
+      [
+        {
+          _tag: "interactionCreated",
+          interaction: {
+            interactionId: "settled",
+            kind: "permission",
+            version: 2,
+            status: "pending",
+            request: { sessionId: "s", title: "Permission", options: [{ optionId: "allow", name: "Allow", kind: "allow_once" }] },
+            outcome: null,
+            createdAt: 1,
+            resolvedAt: null
+          }
+        },
+        { _tag: "interactionSettled", interactionId: "settled", status: "resolved", outcome: { outcome: { outcome: "cancelled" } } },
+        {
+          _tag: "interactionCreated",
+          interaction: {
+            interactionId: "still-pending",
+            kind: "permission",
+            version: 2,
+            status: "pending",
+            request: { sessionId: "s", title: "Permission", options: [{ optionId: "allow", name: "Allow", kind: "allow_once" }] },
+            outcome: null,
+            createdAt: 3,
+            resolvedAt: null
+          }
+        }
+      ],
+      limits
+    )
+    // Dropping a pending interaction would strand its waiting handler fiber.
+    expect(Object.keys(next.interactions)).toEqual(["still-pending"])
+    expect(next.truncated.interactions).toBe(true)
+  })
+
+  test("seq advances once per applied event", () => {
+    const next = State.reduceAll(v2(), [
+      update({ sessionUpdate: "state_update", state: "running" }),
+      update({ sessionUpdate: "state_update", state: "idle" })
+    ])
+    expect(next.seq).toBe(2)
+  })
+})
+
+describe("lifecycle events", () => {
+  test("config options and v1 modes from a lifecycle response are projected", () => {
+    const next = State.reduce(v1(), {
+      _tag: "lifecycle",
+      cwd: "/work",
+      configOptions: [{ id: "model", name: "Model", type: "select", currentValue: "a", options: [{ value: "a", name: "A" }] }],
+      modes: { currentModeId: "code", availableModes: [{ id: "code", name: "Code" }] }
+    })
+    expect(next.metadata.cwd).toBe("/work")
+    expect(next.config["model"]).toBeDefined()
+    expect(next.config["acp/modes"]!.option).toMatchObject({ currentModeId: "code" })
+  })
+})
+
+test("omitted message content keeps prior content while null clears it", () => {
+  const state = State.reduceAll(v2(), [
+    update({ sessionUpdate: "agent_message_chunk", messageId: "m", content: text("keep") }),
+    update({ sessionUpdate: "agent_message", messageId: "m" })
+  ])
+  expect(state.messages[0]!.content).toEqual([text("keep")])
+  expect(State.reduce(state, update({ sessionUpdate: "agent_message", messageId: "m", content: null })).messages[0]!.content).toEqual([])
+})
+
+test("one huge transcript entry and unlimited chunks cannot bypass the byte budget", () => {
+  let state = v2()
+  const limits = { ...defaultContentLimits, transcriptBytes: 2048 }
+  for (let i = 0; i < 30; i++) state = State.reduce(state, update({ sessionUpdate: "agent_message_chunk", messageId: "m", content: text("x".repeat(3000)) }), limits)
+  expect(state.truncated.content).toBe(true)
+  expect(new TextEncoder().encode(JSON.stringify(state)).byteLength).toBeLessThanOrEqual(2048)
+})

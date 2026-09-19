@@ -1,6 +1,6 @@
 # effect-acp architecture
 
-Status: design direction for proposal planning; no package implementation is implied.
+Status: implemented foundation, direct session client, transparent bridge, hosted gateway, and agent authoring. ACP v2 remains an explicit draft opt-in; v1 is the default.
 
 This package provides an Effect-native API for applications that embed rich Agent Client Protocol (ACP) sessions. It prioritizes consuming existing agents, uses ACP v2 as its primary design model, and supports v1 peers through a separate compatibility adapter. Agent authoring is a secondary goal built on the same protocol foundation.
 
@@ -15,7 +15,7 @@ The following product decisions are established:
 - Use Effect Schema throughout protocol boundaries and shared application contracts.
 - Reuse Effect's networking, resource management, concurrency, and service composition facilities.
 
-The module boundaries and hosted protocol below are recommended architectural choices. Exact exported names, retention limits, schema generation tooling, and release sequencing remain proposal decisions.
+The sections below record the architecture and its implementation boundaries. Public module entry points and runnable compositions are listed in README.md.
 
 Initial scope excludes guarantees of survival across host crashes, distributed ownership, concurrent editing by multiple clients, UI components, and an agent reasoning loop. These can build on the architecture without becoming requirements of the protocol package.
 
@@ -110,27 +110,29 @@ src/
   AcpSchema.ts                 Shared IDs, content helpers, application models
   AcpError.ts                  Typed public failures
   AcpProtocol.ts               Version adapter contract and selection
-  AcpTransport.ts              Scoped duplex message connection contract
+  AcpTransport.ts              Context.Service for one scoped duplex connection
   AcpConnector.ts              Factories that open transport connections
   AcpConnection.ts             ACP JSON-RPC peer and request lifecycle
   AcpClient.ts                 Common application-facing service contract
   AcpLocalClient.ts            Direct implementation of AcpClient
   AcpRemoteClient.ts           Hosted implementation of AcpClient
-  AcpSession.ts                Session handles, snapshots, events, interactions
+  AcpApp.ts                    Session snapshots, capabilities, and data schemas
+  AcpSessionState.ts           Pure v1/v2 state reduction
+  AcpSessionError.ts           Application-level typed failures
   AcpHost.ts                   Retained connections and session ownership
   AcpBridge.ts                 Transparent transport relay
   AcpGateway.ts                Application command and event contracts
-  AcpGatewayServer.ts          Host-backed gateway handlers
   AcpGatewayClient.ts          Typed gateway client
-  AcpAgent.ts                  Later: agent-side handler construction
+  AcpAgent.ts                  Agent-side handler construction and serving
+  agent/
+    Store.ts                   Session and transcript persistence contract
+    Content.ts                 Version-neutral content blocks for handlers
   protocol/
     v1/Schema.ts               v1 wire schemas and method definitions
-    v1/Adapter.ts              v1 lifecycle interpretation
-    v1/ClientHandlers.ts       Optional filesystem and terminal execution
     v2/Schema.ts               v2 baseline wire schemas and methods
-    v2/Adapter.ts              v2 lifecycle interpretation
   transport/
     Stdio.ts                  Spawned process connection
+    ProcessStdio.ts           Current-process connection, for served agents
     WebSocket.ts              Custom ACP WebSocket framing
     InMemory.ts               Paired transports for verification
   server/
@@ -138,13 +140,11 @@ src/
     BridgeHttp.ts             Mount transparent ACP WebSocket bridge
   internal/
     jsonRpc.ts                Envelope validation and correlation
-    sessionReducer.ts         Ordered state transitions
-    sessionRuntime.ts         Queues, subscriptions, pending interactions
-    eventJournal.ts           Bounded host event replay
-    submissionLedger.ts       Hosted command deduplication and outcomes
+    capabilities.ts           Versioned capability normalization
+    framing.ts                Bounded UTF-8 newline framing
 ```
 
-Names are illustrative. Pure contracts and reducers must remain browser-safe. Node/Bun process implementations are supplied by the host application, rather than imported through the package's browser-facing entry points. Vendored repositories are references only; application imports use normal dependencies.
+The session runtime lives in AcpLocalClient; the journal, controller registry, and command ledger live in AcpHost. Pure contracts and reducers remain browser-safe. Node/Bun process implementations are supplied by the host application, rather than imported through the package's browser-facing entry points. Vendored repositories are references only; application imports use normal dependencies.
 
 Dependency direction:
 
@@ -168,7 +168,8 @@ Use `Context.Service` for injectable capabilities and `Layer` for their construc
 
 | Boundary | Effect structure | Ownership / dependencies |
 | --- | --- | --- |
-| Transport factory | `AcpConnector` service returning a scoped duplex connection | Process spawner, socket constructor, or app-provided adapter |
+| Transport instance | `AcpTransport` service, provided by stdio/WebSocket/process-stdio/in-memory Layers | Frame reader and ordered writer |
+| Transport factory | `AcpConnector` builds a fresh transport Layer in each caller scope | Process spawner, socket constructor, or app-provided adapter |
 | ACP connection | Scoped value with typed request, notification, and handler operations | One transport, selected protocol adapter, pending-request registry |
 | Application client | `AcpClient` service supplied by local or remote layer | Local connector/runtime or gateway client |
 | Session handle | Value exposing Effect operations and Stream subscriptions | References an owning runtime; UI handle release does not imply remote session close |
@@ -231,7 +232,9 @@ Schema requirements:
 - Share schema-defined errors across gateway endpoints; keep local causes and secrets out of serialized failures.
 - Check schema conformance and codec round trips against the pinned upstream fixtures and representative extension payloads.
 
-`AcpTransport` exchanges framed JSON messages, including batch arrays, bidirectionally. It owns frame decoding/encoding, ordered writes, closure, and transport errors. `AcpConnection` owns envelope validation, method dispatch, request/response correlation, and ACP errors. Per-method schemas belong to protocol adapters. Invalid JSON must remain distinguishable from an invalid JSON-RPC envelope so the peer can produce the appropriate error response when the transport remains usable.
+`AcpTransport` is the injected service for a single scoped connection. Its implementations are `transport/Stdio.layer`, `transport/WebSocket.layer`, `transport/ProcessStdio.layer`, and `transport/InMemory.layer`. `AcpConnection.make` consumes that service; `AcpConnection.layer` exposes the JSON-RPC connection as a service. `AcpConnector.layer(transportLayer)` is a separate, lazy factory for applications opening multiple connections, building the transport Layer freshly inside each caller scope.
+
+The transport service exchanges framed JSON messages, including batch arrays, bidirectionally. It owns frame decoding/encoding, ordered writes, closure, and transport errors. `AcpConnection` owns envelope validation, method dispatch, request/response correlation, and ACP errors. Per-method schemas belong to protocol adapters. Invalid JSON must remain distinguishable from an invalid JSON-RPC envelope so the peer can produce the appropriate error response when the transport remains usable.
 
 Stdio framing must tolerate arbitrary byte boundaries, including split UTF-8 and split lines. Configure maximum frame sizes and bounded buffering. A WebSocket adapter has its own documented frame policy. A raw bridge can validate envelopes without reconstructing method payloads and thereby discarding unknown data.
 
@@ -318,15 +321,23 @@ For v1 execution capabilities, advertise only installed handlers. Hosted filesys
 
 Instrument connection/session lifetimes, pending request counts, replay gaps, queue limits, and reconnect attempts using Effect logging and tracing. Avoid logging prompt bodies, credentials, filesystem contents, or permission payloads by default. Keep app authentication separate from ACP agent authentication.
 
-## 10. Agent authoring, later
+## 10. Agent authoring
 
-`AcpAgent` should reuse the wire schemas, version adapters, duplex peer, error mapping, transport layers, and cancellation machinery. Application authors provide Effect handlers and services for authentication, session storage, prompts, and tool execution.
+`AcpAgent` reuses the wire schemas, duplex peer, error mapping, transport layers, and cancellation machinery. Authors provide Effect handlers and services for authentication, session storage, and prompts; application dependencies flow through the ordinary Effect environment (`AcpAgent.make<R>`), and the agent discharges them once per served connection.
 
-Provide helpers for typed session updates and calling client-side permission/elicitation methods. Build capability declarations from configured handler surfaces or validate them at construction so an agent cannot accidentally advertise unimplemented baseline methods.
+Capabilities are derived from the installed handler surface and validated at construction, so an agent cannot advertise a baseline method it does not implement: advertising sessions requires `session.create`, `prompt.insert`, and `prompt.execute`; a non-empty `auth.methods` list requires both `auth.login` and `auth.logout`. `make` throws `AcpAgentConfigError` rather than failing at the first connection.
 
-Keep agent storage and model/tool orchestration injectable. Integrating Effect's AI services may be convenient, but ACP conformance must not require a particular model provider or reasoning loop. Hosting an existing stdio agent must not depend on the agent-authoring module.
+Prompting has two phases because the versions disagree about when a prompt is answered. `prompt.insert` records the user message and yields its canonical `messageId`; only its success produces a v2 `session/prompt` response. `prompt.execute` then runs the foreground turn in a scope owned by the *session*, not the request fiber, so v2 processing continues after acknowledgement. V1 keeps its turn-long response and reports the stop reason there, while v2 reports completion as an idle `state_update` after final updates have been emitted.
 
-## 11. Verification gates for future proposals
+`Emit` maps typed updates onto the negotiated version — chunks drop `messageId` on v1, and full-message replacement is refused there rather than inventing a wire shape. Replay reads the injected `Store`: a retained replacement resets the client's accumulated content before chunks are appended, preserving the original message identity. Retention guarantees belong to the supplied store, not the library; `Store.layer` is an in-memory reference implementation.
+
+Client interactions (`requestPermission`, `elicit`) run as ordinary outgoing requests, so a waiting handler never blocks unrelated traffic. An elicitation mode the client did not advertise is rejected before anything is sent. Session cancellation interrupts owned execution, letting its finalizers drain final updates before the cancelled completion signal.
+
+Handler failures map to their typed code; defects are logged locally and reported as a bare `Internal error`, so causes never reach the client.
+
+`transport/ProcessStdio` serves the current process's stdin/stdout through Effect's injected `Stdio` service — the mirror of the spawning `transport/Stdio`. Stdout carries only ACP frames; use `ProcessStdio.diagnostic` or a logger for anything else. `AcpAgent.serveStdio` and `AcpAgent.layerStdio` compose it. Storage and model/tool orchestration stay injectable: ACP conformance requires no particular model provider or reasoning loop, and hosting an existing stdio agent does not depend on this module. See `examples/echo-agent.ts`.
+
+## 11. Verification gates
 
 Implementation should demonstrate these behaviors before claiming the corresponding capability:
 
@@ -342,18 +353,20 @@ Implementation should demonstrate these behaviors before claiming the correspond
 - Retention expiry and shutdown release scopes, processes, queues, and waits; closing one session does not kill unrelated sessions.
 - Ownership checks reject access through another principal's session handle, event cursor, operation ID, or stale control attachment.
 
-Use paired in-memory transports, deterministic Effect concurrency/clock tests, protocol fixtures, and real subprocess/browser integration checks where needed. These are future acceptance gates, not tests performed while writing this document.
+Use paired in-memory transports, deterministic Effect concurrency/clock tests, protocol fixtures, and real subprocess/browser integration checks where needed. The tests exercise local/remote shared contracts, deterministic ownership/retry/overflow failures, and real WebSocket/subprocess recovery. `bun run check` also verifies schema generation, types, and browser imports.
 
-## 12. Open proposal decisions and reference snapshot
+## 12. Decisions and reference snapshot
 
-Resolve these in focused proposals:
+The implemented proposals resolve the following choices:
 
-1. Exact public session/submission API and the exposed v1 limitations.
-2. Schema generation approach and update workflow for upstream drafts.
-3. Whether an ACP-compatible adapter over public Effect RPC facilities is simpler than a small dedicated Effect peer.
-4. Hosted gateway contract versioning, command retention, controller replacement, replay limits, and retention timeout defaults.
-5. First runtime adapters and representative v1/v2 agents for interoperability checks.
-6. Whether a draft Streamable HTTP profile belongs in the first release or follows the documented custom WebSocket transport.
+1. AcpClient/AcpSession handles distinguish v1 turn completion, v2 insertion acknowledgement, and session foreground state.
+2. Version-pinned generated schemas are checked against the vendored JSON Schema inputs.
+3. ACP uses its own schema-aware JSON-RPC peer; the hosted application protocol uses Effect RPC.
+4. Gateway v1 uses server-issued retry windows, generation-based control, bounded snapshot journals, and an explicit host policy with no hidden unbounded retention defaults.
+5. In-memory, spawned stdio, current-process stdio, and custom WebSocket adapters are implemented with injected runtimes.
+6. Draft Streamable HTTP remains outside these proposals. The implemented bridge profile is explicitly package-owned.
+
+The gateway mounts using the public `makeProtocolWithHttpEffectWebsocket` primitive underlying `layerProtocolWebsocket`; per-upgrade handlers capture authenticated identity. The client builds its protocol layer in the socket owner's scope and disables transport retries. Client root imports do not pull in AcpHost, agent authoring, or server routes.
 
 Research baseline: 2026-09-18, local Effect `4.0.0-rc.115`, and the vendored ACP docs/schema files referenced above. Schema SHA-256 values at review time:
 

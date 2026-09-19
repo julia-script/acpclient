@@ -1,7 +1,12 @@
+import * as Schema from "effect/Schema"
+import * as Effect from "effect/Effect"
+import * as Deferred from "effect/Deferred"
+import * as Config from "effect/Config"
+import * as Option from "effect/Option"
 /**
- * Independent scripted ACP agent. Uses only JSON and plain callbacks; it does
- * not import the library, so it checks the library's wire behavior rather than
- * agreeing with it by construction.
+ * Independent scripted ACP agent. Uses raw JSON with Effect-managed waits; it
+ * does not import the library, so it checks the library's wire behavior rather
+ * than agreeing with it by construction.
  *
  * In-process: `createAgent(options, emit)` returns a line handler.
  * Subprocess: `bun test/fixtures/agent.ts <version> <mode>` speaks stdio.
@@ -19,22 +24,35 @@
  */
 export interface AgentOptions {
   readonly version: 1 | 2
-  readonly mode?: "normal" | "unsupported" | "no-read"
+  readonly mode?: "normal" | "unsupported" | "no-read" | "ignore-close"
   readonly stderr?: (text: string) => void
   readonly exit?: (code: number) => void
 }
 
-type Message = Record<string, any>
+const RequestId = Schema.Union([Schema.String, Schema.Finite, Schema.Null])
+type RequestId = typeof RequestId.Type
+const Message = Schema.Struct({ jsonrpc: Schema.optionalKey(Schema.Literal("2.0")), id: Schema.optionalKey(RequestId), method: Schema.optionalKey(Schema.String),
+  params: Schema.optionalKey(Schema.Unknown), result: Schema.optionalKey(Schema.Unknown), error: Schema.optionalKey(Schema.Unknown),
+  batch: Schema.optionalKey(Schema.Array(Schema.Unknown)) })
+type Message = typeof Message.Type
+const Frame = Schema.fromJsonString(Schema.Union([Message, Schema.Array(Message)]))
+const SessionParams = Schema.Struct({ sessionId: Schema.String })
+const PermissionResult = Schema.Struct({ outcome: Schema.optionalKey(Schema.Struct({ optionId: Schema.optionalKey(Schema.String) })) })
+
 
 export const createAgent = (options: AgentOptions, emit: (line: string) => void) => {
   const { version } = options
   const received: Array<string> = []
-  const waiting = new Map<unknown, (message: Message) => void>()
-  const slow = new Set<unknown>()
+  const waiting = new Map<RequestId | undefined, Deferred.Deferred<Message>>()
+  const slow = new Set<RequestId | undefined>()
   let nextId = 0
-  const send = (message: unknown) => emit(JSON.stringify(message))
-  const respond = (id: unknown, result: unknown) => send({ jsonrpc: "2.0", id, result })
-  const expectReply = (id: unknown) => new Promise<Message>((resolve) => waiting.set(id, resolve))
+  const send = (message: unknown) => Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(message).pipe(Effect.map(emit))
+  const respond = (id: RequestId | undefined, result: unknown) => send({ jsonrpc: "2.0", id, result })
+  const expectReply = (id: RequestId | undefined) => {
+    const reply = Deferred.makeUnsafe<Message>()
+    waiting.set(id, reply)
+    return Deferred.await(reply)
+  }
 
   const update = (sessionId: string) =>
     version === 1
@@ -50,101 +68,114 @@ export const createAgent = (options: AgentOptions, emit: (line: string) => void)
       }
       : { sessionId, title: "Edit file", options: [{ optionId: "allow", name: "Allow", kind: "allow_once" }] }
 
-  const handle = async (message: Message) => {
+  const handle = (message: Message) => Effect.gen(function*() {
     if (!("method" in message)) {
-      waiting.get(message.id)?.(message)
+      const reply = waiting.get(message.id)
+      if (reply) yield* Deferred.succeed(reply, message)
       waiting.delete(message.id)
       return
     }
     const { id, method, params } = message
     switch (method) {
       case "initialize":
-        if (options.mode === "unsupported") return respond(id, { protocolVersion: 99 })
-        return respond(
+        if (options.mode === "unsupported") return yield* respond(id, { protocolVersion: 99 })
+        return yield* respond(
           id,
           version === 1
             ? { protocolVersion: 1, agentCapabilities: { loadSession: false }, authMethods: [] }
             : { protocolVersion: 2, info: { name: "fixture-agent", version: "1.0.0" }, capabilities: { session: {} } }
         )
+      case "session/close":
+        if (options.mode === "ignore-close") return
+        return yield* send({ jsonrpc: "2.0", id, error: { code: -32601, message: "Method not found" } })
       case "session/new":
-        return respond(id, { sessionId: "sess-1" })
+        return yield* respond(id, { sessionId: "sess-1" })
       case "session/prompt": {
-        send({ jsonrpc: "2.0", method: "session/update", params: update(params.sessionId) })
+        const { sessionId } = yield* Schema.decodeUnknownEffect(SessionParams)(params)
+        yield* send({ jsonrpc: "2.0", method: "session/update", params: update(sessionId) })
         // Deliberately reuse the client's request id for the reverse request.
         const reply = expectReply(id)
-        send({ jsonrpc: "2.0", id, method: "session/request_permission", params: permission(params.sessionId) })
-        const answer = await reply
-        const optionId = answer.result?.outcome?.optionId ?? "none"
-        if (version === 1) return respond(id, { stopReason: "end_turn", _meta: { optionId } })
-        respond(id, { messageId: "m-1", _meta: { optionId } })
-        return send({
+        yield* send({ jsonrpc: "2.0", id, method: "session/request_permission", params: permission(sessionId) })
+        const answer = yield* reply
+        const result = yield* Schema.decodeUnknownEffect(PermissionResult)(answer.result)
+        const optionId = result.outcome?.optionId ?? "none"
+        if (version === 1) return yield* respond(id, { stopReason: "end_turn", _meta: { optionId } })
+        yield* respond(id, { messageId: "m-1", _meta: { optionId } })
+        return yield* send({
           jsonrpc: "2.0",
           method: "session/update",
-          params: { sessionId: params.sessionId, update: { sessionUpdate: "state_update", state: "idle", stopReason: "end_turn" } }
+          params: { sessionId: sessionId, update: { sessionUpdate: "state_update", state: "idle", stopReason: "end_turn" } }
         })
       }
       case "_fixture/malformed": {
         const parse = expectReply(null)
         emit("{not json")
-        const parseReply = await parse
+        const parseReply = yield* parse
         const unknown = expectReply("u-1")
-        send({ jsonrpc: "2.0", id: "u-1", method: "_fixture/unknown", params: {} })
-        const unknownReply = await unknown
+        yield* send({ jsonrpc: "2.0", id: "u-1", method: "_fixture/unknown", params: {} })
+        const unknownReply = yield* unknown
         const notificationId = `n-${nextId++}`
         const batch = expectReply("b-1")
-        send([
+        yield* send([
           { jsonrpc: "2.0", id: "b-1", method: "_fixture/echo", params: { ok: true } },
           { jsonrpc: "2.0", method: "_fixture/note", params: { id: notificationId } },
           { jsonrpc: "2.0", id: 5 } // neither request nor response
         ])
-        const batchReply = await batch
-        return respond(id, { parse: parseReply, unknown: unknownReply, batch: batchReply })
+        const batchReply = yield* batch
+        return yield* respond(id, { parse: parseReply, unknown: unknownReply, batch: batchReply })
       }
       case "_fixture/transcript":
-        return respond(id, { lines: received.slice() })
+        return yield* respond(id, { lines: received.slice() })
       case "_fixture/slow":
         slow.add(id)
         return
-      case "$/cancel_request":
-        if (slow.delete(params?.requestId)) {
-          send({ jsonrpc: "2.0", id: params.requestId, error: { code: -32800, message: "Request cancelled" } })
-        }
+      case "$/cancel_request": {
+        const { requestId } = yield* Schema.decodeUnknownEffect(Schema.Struct({ requestId: RequestId }))(params)
+        if (slow.delete(requestId)) yield* send({ jsonrpc: "2.0", id: requestId, error: { code: -32800, message: "Request cancelled" } })
         return
-      case "_fixture/stderr":
-        options.stderr?.("x".repeat(params.bytes))
-        return respond(id, { wrote: params.bytes })
+      }
+      case "_fixture/stderr": {
+        const { bytes } = yield* Schema.decodeUnknownEffect(Schema.Struct({ bytes: Schema.Int }))(params)
+        options.stderr?.("x".repeat(bytes))
+        return yield* respond(id, { wrote: bytes })
+      }
       case "_fixture/crash":
         return options.exit?.(3)
       default:
-        if (id !== undefined) send({ jsonrpc: "2.0", id, error: { code: -32601, message: "Method not found" } })
+        if (id !== undefined) yield* send({ jsonrpc: "2.0", id, error: { code: -32601, message: "Method not found" } })
     }
-  }
+  })
 
   return (line: string) => {
     received.push(line)
-    const value = JSON.parse(line)
-    // A batch reply is routed as one message keyed by its first request id.
-    if (Array.isArray(value)) {
-      const request = value.find((e: Message) => e.id === "b-1")
-      if (request) waiting.get("b-1")?.({ id: "b-1", batch: value })
-      waiting.delete("b-1")
-      return
-    }
-    void handle(value)
+    Effect.runFork(Effect.gen(function*() {
+      const value = yield* Schema.decodeEffect(Frame)(line)
+      // A batch reply is routed as one message keyed by its first request id.
+      if (Array.isArray(value)) {
+        const request = value.find((entry) => entry.id === "b-1")
+        const reply = waiting.get("b-1")
+        if (request && reply) yield* Deferred.succeed(reply, { id: "b-1", batch: value })
+        waiting.delete("b-1")
+        return
+      }
+      const message = yield* Schema.decodeUnknownEffect(Message)(value)
+      yield* handle(message)
+    }))
   }
 }
 
 if (import.meta.main) {
   const [versionArg, mode = "normal"] = process.argv.slice(2)
-  if (process.env.ACP_FIXTURE_PIDFILE) await Bun.write(process.env.ACP_FIXTURE_PIDFILE, String(process.pid))
+  const pidfile = await Effect.runPromise(Config.option(Config.String("ACP_FIXTURE_PIDFILE")))
+  if (Option.isSome(pidfile)) await Bun.write(pidfile.value, String(process.pid))
   const onLine = createAgent({
     version: versionArg === "2" ? 2 : 1,
-    mode: mode as AgentOptions["mode"],
+    mode: await Effect.runPromise(Schema.decodeUnknownEffect(Schema.Literals(["normal", "unsupported", "no-read", "ignore-close"]))(mode)),
     stderr: (text) => process.stderr.write(text),
     exit: (code) => process.exit(code)
   }, (line) => process.stdout.write(line + "\n"))
   if (mode === "no-read") {
-    setInterval(() => {}, 1 << 30)
+    await Effect.runPromise(Effect.never)
   } else {
     const { createInterface } = await import("node:readline")
     for await (const line of createInterface({ input: process.stdin })) {

@@ -1,3 +1,4 @@
+import * as Schema from "effect/Schema"
 /**
  * Incremental UTF-8 newline framing for ACP stdio.
  *
@@ -51,7 +52,7 @@ export const makeDecoder = (maxFrameBytes: number) => {
         start = newline + 1
         if (bufferedBytes + part.length > maxFrameBytes) return { frames, error: tooLarge() }
         const frame = complete(part)
-        if (frame instanceof AcpTransportError) return { frames, error: frame }
+        if (Schema.is(AcpTransportError)(frame)) return { frames, error: frame }
         if (frame !== undefined) frames.push(frame)
       }
       const rest = chunk.subarray(start)

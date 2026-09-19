@@ -1,39 +1,40 @@
-/**
- * Regenerates the versioned wire schema modules from the pinned inputs.
- *
- *   bun scripts/codegen/generate.ts          write outputs
- *   bun scripts/codegen/generate.ts --check  fail if checked-in outputs drift
- */
-import { readFile, writeFile } from "node:fs/promises"
-import { join } from "node:path"
+/** Regenerates versioned wire schemas; --check verifies checked-in outputs. */
+import * as BunServices from "@effect/platform-bun/BunServices"
+import * as Effect from "effect/Effect"
+import * as Logger from "effect/Logger"
+import * as FileSystem from "effect/FileSystem"
+import * as Path from "effect/Path"
 import { emitModule } from "./emit.ts"
 import { loadInput, loadManifest, root } from "./inputs.ts"
 
-export const generateAll = async (): Promise<ReadonlyArray<{ readonly output: string; readonly source: string }>> => {
-  const manifest = await loadManifest()
-  return Promise.all(manifest.inputs.map(async (input) => {
-    const { schema } = await loadInput(input)
+export const generateAll = Effect.gen(function*() {
+  const manifest = yield* loadManifest()
+  return yield* Effect.forEach(manifest.inputs, (input) => Effect.gen(function*() {
+    const { schema } = yield* loadInput(input)
     return { output: input.output, source: emitModule(schema, { manifest, input }) }
-  }))
-}
+  }), { concurrency: "unbounded" })
+})
 
 if (import.meta.main) {
-  const check = process.argv.includes("--check")
-  const outputs = await generateAll()
-  const drifted: Array<string> = []
-  for (const { output, source } of outputs) {
-    const path = join(root, output)
-    if (check) {
-      const current = await readFile(path, "utf8").catch(() => undefined)
-      if (current !== source) drifted.push(output)
-    } else {
-      await writeFile(path, source)
-      console.log(`wrote ${output}`)
+  await Effect.runPromise(Effect.gen(function*() {
+    const fs = yield* FileSystem.FileSystem
+    const path = yield* Path.Path
+    const check = process.argv.includes("--check")
+    const outputs = yield* generateAll
+    const drifted: Array<string> = []
+    for (const { output, source } of outputs) {
+      const file = path.join(root, output)
+      if (check) {
+        const current = yield* fs.readFileString(file).pipe(Effect.catch(() => Effect.void))
+        if (current !== source) drifted.push(output)
+      } else {
+        yield* fs.writeFileString(file, source)
+        yield* Effect.log(`wrote ${output}`)
+      }
     }
-  }
-  if (drifted.length > 0) {
-    console.error(`Generated schemas are out of date: ${drifted.join(", ")}\nRun \`bun run generate\` and review the diff.`)
-    process.exit(1)
-  }
-  if (check) console.log("generated schemas are up to date")
+    if (drifted.length > 0) {
+      yield* Effect.logError(`Generated schemas are out of date: ${drifted.join(", ")}\nRun \`bun run generate\` and review the diff.`).pipe(Effect.provide(Logger.layer([Logger.withConsoleError(Logger.formatSimple)])))
+      process.exitCode = 1
+    } else if (check) yield* Effect.log("generated schemas are up to date")
+  }).pipe(Effect.provide(BunServices.layer)))
 }

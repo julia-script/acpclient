@@ -1,0 +1,202 @@
+import { randomUUID } from "./internal/crypto.ts"
+/** AcpClient implementation over the package-owned gateway (never raw ACP). */
+import * as Cause from "effect/Cause"
+import * as Deferred from "effect/Deferred"
+import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
+import * as Layer from "effect/Layer"
+import * as Queue from "effect/Queue"
+import * as Schema from "effect/Schema"
+import * as Scope from "effect/Scope"
+import * as Stream from "effect/Stream"
+import { SessionSnapshot, type SubmissionSnapshot } from "./AcpApp.ts"
+import { AcpClient, type AcpAgentConnection, type AcpSession, type Observation, type OperationError } from "./AcpClient.ts"
+import { AcpConnectionClosed } from "./AcpError.ts"
+import * as AcpGateway from "./AcpGateway.ts"
+import type { Client } from "./AcpGatewayClient.ts"
+import { AcpCapabilityUnsupported, AcpSessionBusy, AcpSubscriptionOverflow } from "./AcpSessionError.ts"
+
+export interface Options {
+  readonly profile: string
+  readonly profileOptions?: unknown
+  readonly observerCapacity?: number
+  /** Distinguishes multiple connections to the same launch profile. */
+  readonly connectionKey?: string
+}
+export type SessionDescriptor = AcpGateway.SessionDescriptor
+const RetainedSession = Schema.UndefinedOr(Schema.Struct({ cursor: AcpGateway.Cursor, snapshot: SessionSnapshot }))
+const RetainedConnection = Schema.UndefinedOr(Schema.Struct({ epoch: Schema.String, descriptor: Schema.optionalKey(AcpGateway.ConnectionDescriptor), operationId: Schema.String }))
+const network = <A, E, R>(effect: Effect.Effect<A, E, R>) => effect.pipe(Effect.catchIf(
+  (error): error is Extract<E, { _tag: "RpcClientError" }> => typeof error === "object" && error !== null && "_tag" in error && error._tag === "RpcClientError",
+  () => Effect.fail(AcpGateway.failure("Closed"))))
+
+export const make = (gateway: Client, options: Options) => Effect.gen(function*() {
+  const capacity = options.observerCapacity ?? 256
+  if (!Number.isSafeInteger(capacity) || capacity <= 0) return yield* AcpGateway.failure("Invalid")
+    const sessions = new Map<string, AcpSession>()
+  const controllers = new Map<string, number>()
+  const run = (command: AcpGateway.Command, generation?: number): Effect.Effect<unknown, AcpGateway.CommandError> =>
+    network(gateway.command(command, generation)).pipe(Effect.flatMap((op) => op.error ? Effect.fail(op.error) : Effect.succeed(op.result)))
+
+  /** Reattaches retained state without ACP initialize/resume or resubmitting a prompt. */
+  const attach = (descriptor: SessionDescriptor, takeover = false): Effect.Effect<AcpSession, AcpGateway.GatewayError, Scope.Scope> => Effect.gen(function*() {
+    if (descriptor.epoch !== gateway.window.epoch) return yield* AcpGateway.failure("HostRestarted")
+    const existing = sessions.get(descriptor.session)
+    if (existing) return existing
+    const owned = yield* Scope.fork(yield* Scope.Scope)
+    const key = `${gateway.prefix}:session:${descriptor.session}`
+    const saved = yield* gateway.storage.load(key).pipe(Effect.flatMap(Schema.decodeUnknownEffect(RetainedSession)), Effect.mapError(() => AcpGateway.failure("Invalid")))
+    const retained = saved?.cursor.epoch === gateway.window.epoch ? saved : undefined
+    let snapshot = retained?.snapshot
+    let sequence = retained?.cursor.sequence ?? -1
+    let boundary = -1
+    let generation = 0
+    let failed: AcpGateway.GatewayError | undefined
+    const observers = new Set<Queue.Queue<Observation, AcpSubscriptionOverflow | AcpGateway.GatewayError | Cause.Done>>()
+    const ready = yield* Deferred.make<void, AcpGateway.GatewayError>()
+    const failure = (error: AcpGateway.GatewayError) => Effect.gen(function*() {
+      failed = error
+      if (controllers.get(descriptor.session) === generation) {
+        sessions.delete(descriptor.session)
+        controllers.delete(descriptor.session)
+      }
+      yield* Deferred.fail(ready, error)
+      for (const queue of observers) yield* Queue.fail(queue, error)
+    })
+    const publish = (next: SessionSnapshot) => Effect.sync(() => {
+      snapshot = next
+      for (const queue of observers) if (!Queue.offerUnsafe(queue, { _tag: "snapshot", snapshot: next })) {
+        Queue.failCauseUnsafe(queue, Cause.fail(new AcpSubscriptionOverflow({ message: "Remote observer requires a fresh boundary" })))
+        observers.delete(queue)
+      }
+    })
+    const receive = (frame: AcpGateway.Frame) => Effect.gen(function*() {
+      if (frame._tag === "Attached") {
+        generation = frame.generation
+        controllers.set(descriptor.session, generation)
+        boundary = frame.cursor.sequence
+        if (frame.snapshot) { sequence = frame.cursor.sequence; yield* publish(frame.snapshot) }
+      } else if (frame.cursor.sequence > sequence) {
+        if (frame.cursor.sequence !== sequence + 1) return yield* AcpGateway.failure("ResyncRequired")
+        sequence = frame.cursor.sequence
+        yield* publish(frame.snapshot)
+      }
+      if (snapshot) yield* gateway.storage.save(key, { cursor: { ...frame.cursor, sequence }, snapshot })
+      if (snapshot && sequence >= boundary) yield* Deferred.succeed(ready, undefined)
+    })
+    const incoming = gateway.api.Attach({ epoch: gateway.window.epoch, workspace: gateway.window.workspace,
+      clientId: gateway.clientId, session: descriptor.session, takeover,
+      ...(retained ? { cursor: retained.cursor } : {}) })
+    yield* network(Stream.runForEach(incoming, receive)).pipe(
+      Effect.andThen(failure(AcpGateway.failure("Closed"))), Effect.catch((error) => failure(error)), Effect.forkIn(owned))
+    yield* Deferred.await(ready).pipe(Effect.onError(() => Scope.close(owned, Exit.void)))
+    const observe: AcpSession["observe"] = Effect.gen(function*() {
+      const queue = yield* Queue.bounded<Observation, AcpSubscriptionOverflow | AcpGateway.GatewayError | Cause.Done>(capacity)
+      observers.add(queue)
+      yield* Effect.addFinalizer(() => Effect.sync(() => { observers.delete(queue) }).pipe(Effect.andThen(Queue.shutdown(queue))))
+      if (failed) yield* Queue.fail(queue, failed)
+      return { snapshot: snapshot!, changes: Stream.fromQueue(queue) }
+    })
+    const command = (command: AcpGateway.Command) => Effect.suspend(() => failed ? Effect.fail(failed) : run(command, generation))
+    const waitFor = (id: string, terminal: boolean): Effect.Effect<SubmissionSnapshot, OperationError> => Effect.scoped(Effect.gen(function*() {
+      const observed = yield* observe
+      const matches = (state: SessionSnapshot) => {
+        const sub = state.submissions[id]
+        return sub && (!terminal || ["completed", "failed"].includes(sub.status._tag)) ? sub : undefined
+      }
+      const current = matches(observed.snapshot)
+      if (current) return current
+      const result = yield* Stream.runHead(observed.changes.pipe(Stream.map((event) => matches(event.snapshot)), Stream.filter((s) => s !== undefined))).pipe(
+        Effect.mapError(() => AcpGateway.failure("ResyncRequired")))
+      if (result._tag === "None") return yield* AcpGateway.failure("Closed")
+      return result.value!
+    }))
+    const session: AcpSession = {
+      sessionId: descriptor.sessionId, version: descriptor.version,
+      release: Effect.sync(() => {
+        if (sessions.get(descriptor.session) === session) sessions.delete(descriptor.session)
+        if (controllers.get(descriptor.session) === generation) controllers.delete(descriptor.session)
+      }).pipe(Effect.andThen(Scope.close(owned, Exit.void))),
+      snapshot: Effect.sync(() => snapshot!), observe,
+      changes: Stream.unwrap(Effect.map(observe, (value) => value.changes)),
+      submit: (prompt) => Effect.gen(function*() {
+        if (snapshot!.activeSubmissionId !== null || !["unknown", "idle"].includes(snapshot!.foreground.state)) return yield* new AcpSessionBusy({ message: "Session has foreground work" })
+        let operation = yield* network(gateway.submit({ _tag: "Submit", session: descriptor.session, prompt }, generation))
+        while (operation.result === null && operation.status === "admitted") {
+          yield* Effect.sleep("1 millis")
+          operation = yield* network(gateway.api.Operation({ window: gateway.window, operationId: operation.operationId }))
+        }
+        if (operation.error) return yield* operation.error
+        const result = yield* Schema.decodeUnknownEffect(AcpGateway.SubmissionResult)(operation.result).pipe(Effect.mapError(() => AcpGateway.failure("Invalid")))
+        const resultOperationId = operation.operationId
+        let latest = yield* waitFor(result.submissionId, false)
+        const finished = yield* Deferred.make<SubmissionSnapshot, OperationError>()
+        yield* Deferred.complete(finished, waitFor(result.submissionId, true).pipe(
+          Effect.tap((sub) => Effect.sync(() => { latest = sub })),
+          Effect.flatMap((sub) => sub.status._tag === "failed" ? Effect.fail(AcpGateway.failure("AgentFailure")) : Effect.succeed(sub)))).pipe(Effect.forkIn(owned))
+        const accepted = yield* Deferred.make<string, OperationError>()
+        yield* Deferred.complete(accepted, descriptor.version === 1 ? Effect.fail(new AcpCapabilityUnsupported({ operation: "session/prompt acceptance", version: 1 })) : Effect.gen(function*() {
+          const operation = yield* network(gateway.wait(resultOperationId))
+          if (operation.error) return yield* operation.error
+          const accepted = yield* Schema.decodeUnknownEffect(AcpGateway.SubmissionResult)(operation.result).pipe(Effect.mapError(() => AcpGateway.failure("Invalid")))
+          if (accepted.agentMessageId === null) return yield* AcpGateway.failure("Invalid")
+          return accepted.agentMessageId
+        })).pipe(Effect.forkIn(owned))
+        return { id: result.submissionId,
+          snapshot: Effect.sync(() => { latest = snapshot!.submissions[result.submissionId] ?? latest; return latest }),
+          accepted: Deferred.await(accepted), outcome: Deferred.await(finished) }
+
+      }),
+      cancel: Effect.asVoid(command({ _tag: "Cancel", session: descriptor.session })),
+      resolveInteraction: (interactionId, resolution) => Effect.asVoid(command({ _tag: "Resolve", session: descriptor.session, interactionId, resolution })),
+      setConfigOption: (configId, value) => Effect.asVoid(command({ _tag: "Configure", session: descriptor.session, configId, value })),
+      setMode: (modeId) => Effect.asVoid(command({ _tag: "Mode", session: descriptor.session, modeId })),
+      close: Effect.asVoid(command({ _tag: "Close", session: descriptor.session })),
+      delete: Effect.asVoid(command({ _tag: "Delete", session: descriptor.session }))
+    }
+    sessions.set(descriptor.session, session)
+    yield* Scope.addFinalizer(owned, Effect.suspend(() => {
+      if (sessions.get(descriptor.session) === session) sessions.delete(descriptor.session)
+      if (controllers.get(descriptor.session) === generation) controllers.delete(descriptor.session)
+      failed = AcpGateway.failure("Closed")
+      return Effect.forEach(observers, Queue.end, { discard: true })
+    }))
+    return session
+  })
+  const connect: AcpClient["Service"]["connect"] = () => Effect.gen(function*() {
+    const connectionScope = yield* Scope.Scope
+    const key = `${gateway.prefix}:connection:${options.connectionKey ?? options.profile}`
+    const cached = yield* gateway.storage.load(key).pipe(Effect.flatMap(Schema.decodeUnknownEffect(RetainedConnection)), Effect.mapError(() => AcpGateway.failure("Invalid")))
+    if (cached && cached.epoch !== gateway.window.epoch) return yield* AcpGateway.failure("HostRestarted")
+    let descriptor = cached?.epoch === gateway.window.epoch ? cached.descriptor : undefined
+    if (!descriptor) {
+      const operationId = cached?.epoch === gateway.window.epoch ? cached.operationId : (yield* randomUUID.pipe(Effect.mapError(() => AcpGateway.failure("Invalid"))))
+      yield* gateway.storage.save(key, { epoch: gateway.window.epoch, operationId })
+      let operation = cached?.epoch === gateway.window.epoch
+        ? yield* network(gateway.retry(operationId))
+        : yield* network(gateway.submit({ _tag: "Open", profile: options.profile, options: options.profileOptions ?? null }, undefined, operationId))
+      if (operation.status === "admitted") operation = yield* network(gateway.wait(operationId))
+      if (operation.error) return yield* AcpGateway.failure(operation.error._tag === "AcpGatewayError" ? operation.error.code : "AgentFailure")
+      descriptor = yield* Schema.decodeUnknownEffect(AcpGateway.ConnectionDescriptor)(operation.result).pipe(Effect.mapError(() => AcpGateway.failure("Invalid")))
+      yield* gateway.storage.save(key, { epoch: gateway.window.epoch, operationId, descriptor })
+    }
+    const connection = descriptor.connection
+    const establish = (command: AcpGateway.Command) => run(command).pipe(Effect.flatMap((value) => Schema.decodeUnknownEffect(AcpGateway.SessionDescriptor)(value).pipe(Effect.mapError(() => AcpGateway.failure("Invalid")))), Effect.flatMap((descriptor) => Scope.provide(attach(descriptor), connectionScope)))
+    return {
+      capabilities: descriptor.capabilities, negotiated: descriptor.negotiated,
+      closed: Effect.raceFirst(Effect.asVoid(gateway.api.Closed({ epoch: gateway.window.epoch, workspace: gateway.window.workspace, connection })).pipe(Effect.ignore), gateway.disconnected).pipe(
+        Effect.as(new AcpConnectionClosed({ message: "Hosted connection closed" }))),
+      request: (method, params) => Effect.suspend(() => run({ _tag: "Extension", connection, method, params: params ?? null, controllers: Object.fromEntries(controllers) })),
+      newSession: (options) => establish({ _tag: "NewSession", connection, options }),
+      resumeSession: (options) => establish({ _tag: "ResumeSession", connection, options }),
+      listSessions: (cwd) => network(gateway.api.List({ epoch: gateway.window.epoch, workspace: gateway.window.workspace, connection, ...(cwd ? { cwd } : {}) })),
+      authenticate: (methodId) => Effect.asVoid(run({ _tag: "Authenticate", connection, methodId })),
+      logout: Effect.asVoid(run({ _tag: "Logout", connection }))
+    } satisfies AcpAgentConnection
+  })
+  return { connect, attach, descriptor: (session: AcpSession): SessionDescriptor | undefined => {
+    const entry = [...sessions.entries()].find(([, handle]) => handle === session)
+    return entry ? { epoch: gateway.window.epoch, session: entry[0], sessionId: session.sessionId, version: session.version } : undefined
+  } }
+})
+export const layer = (gateway: Client, options: Options) => Layer.effect(AcpClient, make(gateway, options))

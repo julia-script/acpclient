@@ -1,3 +1,6 @@
+import * as Result from "effect/Result"
+import * as Data from "effect/Data"
+import * as Json from "../../src/internal/json.ts"
 /**
  * ACP-specific JSON Schema (2020-12) to Effect Schema emitter.
  *
@@ -9,9 +12,9 @@
 import type { JsonSchemaDocument, Manifest, ManifestInput } from "./inputs.ts"
 import { overrides as defaultOverrides, type Overrides } from "./overrides.ts"
 
-export class UnsupportedSchemaError extends Error {
+export class UnsupportedSchemaError extends Data.TaggedError("UnsupportedSchemaError")<{ readonly message: string }> {
   constructor(readonly definition: string, readonly construct: string, detail?: string) {
-    super(`Unsupported JSON Schema construct "${construct}" in definition ${definition}${detail ? `: ${detail}` : ""}`)
+    super({ message: `Unsupported JSON Schema construct "${construct}" in definition ${definition}${detail ? `: ${detail}` : ""}` })
   }
 }
 
@@ -60,10 +63,9 @@ const typeScoped: Record<string, ReadonlyArray<string>> = {
   pattern: ["string"]
 }
 
-const reserved = new Set(["Schema", "W", "AcpSchema", "version", "provenance", "agentMethods", "clientMethods", "protocolMethods"])
+const reserved = new Set(["Schema", "Wire", "AcpSchema", "version", "provenance", "agentMethods", "clientMethods", "protocolMethods"])
 
-type Json = null | boolean | number | string | ReadonlyArray<Json> | { readonly [key: string]: Json }
-type Node = { readonly [key: string]: Json }
+type Node = Readonly<Record<string, unknown>>
 
 interface Emitted {
   readonly ts: string
@@ -71,7 +73,13 @@ interface Emitted {
 }
 
 const isNode = (u: unknown): u is Node => typeof u === "object" && u !== null && !Array.isArray(u)
-const str = (u: unknown) => JSON.stringify(u)
+// Generation is a synchronous compiler: invalid literals stop it with its
+// declared diagnostic, just like unsupported schema constructs below.
+const str = (u: unknown): string => {
+  const encoded = Json.encodeResult(u)
+  if (Result.isFailure(encoded)) throw new UnsupportedSchemaError("literal", "JSON", encoded.failure.message)
+  return encoded.success
+}
 const indent = (s: string, by = "  ") => s.split("\n").join(`\n${by}`)
 const propertyKey = (k: string) => (/^[A-Za-z_$][\w$]*$/.test(k) ? k : str(k))
 
@@ -89,7 +97,11 @@ class Emitter {
       if (key.startsWith("x-") || annotationKeywords.has(key)) continue
       if (!validationKeywords.has(key)) this.fail(key)
     }
-    const types = input.type === undefined ? undefined : (Array.isArray(input.type) ? input.type : [input.type]) as ReadonlyArray<string>
+    const inputTypes = Array.isArray(input.type) ? input.type : [input.type]
+    const types = input.type === undefined ? undefined : inputTypes.map((type) => {
+      if (typeof type !== "string") return this.fail("type", "expected a string or array of strings")
+      return type
+    })
     for (const [keyword, applicable] of Object.entries(typeScoped)) {
       if (keyword in input && !(types?.some((t) => applicable.includes(t)) ?? false)) {
         this.fail(keyword, `requires an explicit ${applicable.join("/")} type`)
@@ -105,34 +117,35 @@ class Emitter {
     if (input.anyOf !== undefined) parts.push(this.union(this.list(input.anyOf, "anyOf"), "anyOf"))
     if (input.oneOf !== undefined) parts.push(this.union(this.list(input.oneOf, "oneOf"), "oneOf"))
 
-    let result: Emitted = parts.length === 0
-      ? { ts: "unknown", schema: "Schema.Unknown" }
-      : parts.length === 1
-      ? parts[0]!
-      : { ts: parts.map((p) => `(${p.ts})`).join(" & "), schema: `W.allOf(\n  ${parts.map((p) => indent(p.schema)).join(",\n  ")}\n)` }
+    let result: Emitted = { ts: "unknown", schema: "Schema.Unknown" }
+    if (parts.length === 1) result = parts[0]!
+    if (parts.length > 1) result = { ts: parts.map((p) => `(${p.ts})`).join(" & "), schema: `Wire.allOf(\n  ${parts.map((p) => indent(p.schema)).join(",\n  ")}\n)` }
     if (input.not !== undefined) {
       const excluded = this.node(input.not)
-      result = { ts: result.ts, schema: `W.not(\n  ${indent(result.schema)},\n  ${indent(excluded.schema)}\n)` }
+      result = { ts: result.ts, schema: `Wire.not(\n  ${indent(result.schema)},\n  ${indent(excluded.schema)}\n)` }
     }
     return result
   }
 
-  list(u: Json | undefined, keyword: string): ReadonlyArray<Json> {
-    if (!Array.isArray(u) || u.length === 0) this.fail(keyword, "expected a non-empty array")
-    return u as ReadonlyArray<Json>
+  list(u: unknown, keyword: string): ReadonlyArray<unknown> {
+    if (!Array.isArray(u) || u.length === 0) return this.fail(keyword, "expected a non-empty array")
+    return u
   }
 
   ref(ref: string): Emitted {
     const match = /^#\/\$defs\/([A-Za-z_][\w]*)$/.exec(ref)
     if (!match || !(match[1]! in this.definitions)) this.fail("$ref", ref)
-    return { ts: match![1]!, schema: match![1]! }
+    const name = match[1]!
+    const definition = this.definitions[name]
+    const unconstrained = isNode(definition) && Object.keys(definition).every((key) => annotationKeywords.has(key) || key.startsWith("x-"))
+    return { ts: unconstrained ? "unknown" : name, schema: name }
   }
 
-  union(members: ReadonlyArray<Json>, mode: "anyOf" | "oneOf"): Emitted {
+  union(members: ReadonlyArray<unknown>, mode: "anyOf" | "oneOf"): Emitted {
     const emitted = members.map((m) => this.node(m))
     if (emitted.length === 1) return emitted[0]!
     return {
-      ts: emitted.map((e) => `(${e.ts})`).join(" | "),
+      ts: unionType(emitted.map((e) => e.ts)),
       schema: `Schema.Union([\n  ${emitted.map((e) => indent(e.schema)).join(",\n  ")}\n]${mode === "oneOf" ? `, { mode: "oneOf" }` : ""})`
     }
   }
@@ -142,7 +155,10 @@ class Emitter {
       const values = input.const !== undefined ? [input.const] : this.list(input.enum, "enum")
       for (const v of values) {
         if (v !== null && typeof v === "object") this.fail("const", "only primitive constants are supported")
-        if (types && !types.includes(v === null ? "null" : Number.isInteger(v) && types.includes("integer") ? "integer" : typeof v)) {
+        let constantType: string = typeof v
+        if (v === null) constantType = "null"
+        else if (Number.isInteger(v) && types?.includes("integer")) constantType = "integer"
+        if (types && !types.includes(constantType)) {
           this.fail("const", `constant ${str(v)} contradicts type ${str(input.type)}`)
         }
       }
@@ -174,7 +190,7 @@ class Emitter {
         const checks: Array<string> = []
         if (input.minimum !== undefined) checks.push(`Schema.isGreaterThanOrEqualTo(${this.number(input.minimum, "minimum")})`)
         if (input.maximum !== undefined) checks.push(`Schema.isLessThanOrEqualTo(${this.number(input.maximum, "maximum")})`)
-        return { ts: "number", schema: withChecks(type === "integer" ? "W.integer" : "Schema.Finite", checks) }
+        return { ts: "number", schema: withChecks(type === "integer" ? "Wire.integer" : "Schema.Finite", checks) }
       }
       case "array": {
         const item = input.items === undefined ? { ts: "unknown", schema: "Schema.Unknown" } : this.node(input.items)
@@ -188,23 +204,28 @@ class Emitter {
     }
   }
 
-  number(u: Json | undefined, keyword: string): number {
-    if (typeof u !== "number" || !Number.isFinite(u)) this.fail(keyword, "expected a finite number")
-    return u as number
+  number(u: unknown, keyword: string): number {
+    if (typeof u !== "number" || !Number.isFinite(u)) return this.fail(keyword, "expected a finite number")
+    return u
   }
 
   object(input: Node): Emitted {
     const properties = input.properties ?? {}
-    if (!isNode(properties)) this.fail("properties", "expected an object")
-    const required = new Set<string>((input.required ?? []) as ReadonlyArray<string>)
+    if (!isNode(properties)) return this.fail("properties", "expected an object")
+    const requiredInput = input.required ?? []
+    if (!Array.isArray(requiredInput)) return this.fail("required", "expected an array of strings")
+    const required = new Set(requiredInput.map((key) => {
+      if (typeof key !== "string") return this.fail("required", "expected a string")
+      return key
+    }))
     const keys = [...new Set([...Object.keys(properties), ...required])]
     const additional = input.additionalProperties
     if (additional !== undefined && additional !== true) {
       if (keys.length > 0) this.fail("additionalProperties", "a constrained additionalProperties alongside declared properties")
       const value = this.node(additional)
-      return { ts: `{ readonly [key: string]: ${value.ts} }`, schema: `W.record(${value.schema})` }
+      return { ts: `{ readonly [key: string]: ${value.ts} }`, schema: `Wire.record(${value.schema})` }
     }
-    if (keys.length === 0) return { ts: "{ readonly [key: string]: unknown }", schema: "W.object({})" }
+    if (keys.length === 0) return { ts: "{ readonly [key: string]: unknown }", schema: "Wire.object({})" }
     const fields = keys.map((key) => {
       const value = key in properties ? this.node(properties[key]) : { ts: "unknown", schema: "Schema.Unknown" }
       const optional = !required.has(key)
@@ -215,7 +236,7 @@ class Emitter {
     })
     return {
       ts: `{\n  ${fields.map((f) => indent(f.ts)).join("\n  ")}\n}`,
-      schema: `W.object({\n  ${fields.map((f) => indent(f.schema)).join(",\n  ")}\n})`
+      schema: `Wire.object({\n  ${fields.map((f) => indent(f.schema)).join(",\n  ")}\n})`
     }
   }
 }
@@ -223,20 +244,31 @@ class Emitter {
 const withChecks = (schema: string, checks: ReadonlyArray<string>) =>
   checks.length === 0 ? schema : `${schema}.check(${checks.join(", ")})`
 
-const docComment = (node: Json | undefined, prefix = ""): string => {
+const docComment = (node: unknown, prefix = ""): string => {
   const description = isNode(node) && typeof node.description === "string" ? node.description.trim() : ""
   if (!description) return ""
   const body = description.replaceAll("*/", "*\\/").split("\n").map((l) => `${prefix} *${l ? ` ${l}` : ""}`).join("\n")
   return `/**\n${body}\n${prefix} */\n${prefix}`
 }
 
+const references = (value: unknown, refs = new Set<string>()): Set<string> => {
+  if (Array.isArray(value)) {
+    for (const item of value) references(item, refs)
+  } else if (isNode(value)) {
+    if (typeof value.$ref === "string") {
+      const match = /^#\/\$defs\/([\w]+)$/.exec(value.$ref)
+      if (match?.[1]) refs.add(match[1])
+    }
+    for (const item of Object.values(value)) references(item, refs)
+  }
+  return refs
+}
+
 /** Dependency order of definitions; alphabetical among independent ones. */
 const orderDefinitions = (definitions: Readonly<Record<string, unknown>>): ReadonlyArray<string> => {
   const deps = new Map<string, Set<string>>()
   for (const name of Object.keys(definitions)) {
-    const refs = new Set<string>()
-    for (const [, target] of JSON.stringify(definitions[name]).matchAll(/"#\/\$defs\/([\w]+)"/g)) refs.add(target!)
-    deps.set(name, refs)
+    deps.set(name, references(definitions[name]))
   }
   const ordered: Array<string> = []
   const state = new Map<string, "visiting" | "done">()
@@ -263,7 +295,7 @@ interface MethodEntry {
 const envelopeRefs = (definitions: Readonly<Record<string, unknown>>, name: string): ReadonlySet<string> => {
   const def = definitions[name]
   if (def === undefined) throw new UnsupportedSchemaError(name, "$defs", "missing JSON-RPC envelope definition")
-  return new Set([...JSON.stringify(def).matchAll(/"#\/\$defs\/([\w]+)"/g)].map((m) => m[1]!))
+  return references(def)
 }
 
 /** Derives method declarations from `x-method`/`x-side` plus the envelope unions. */
@@ -285,7 +317,10 @@ const collectMethods = (definitions: Readonly<Record<string, unknown>>): Readonl
     const key = `${side} ${def["x-method"]}`
     const entry = methods.get(key) ?? { method: def["x-method"], side }
     methods.set(key, entry)
-    const role = requests.has(name) ? "params" : results.has(name) ? "result" : notifications.has(name) || side === "protocol" ? "notification" : undefined
+    let role: "params" | "result" | "notification" | undefined
+    if (requests.has(name)) role = "params"
+    else if (results.has(name)) role = "result"
+    else if (notifications.has(name) || side === "protocol") role = "notification"
     if (role === undefined) throw new UnsupportedSchemaError(name, "x-method", "not referenced by any JSON-RPC envelope")
     if (role === "result") {
       entry.result = name
@@ -327,7 +362,7 @@ export const emitModule = (document: JsonSchemaDocument, options: EmitOptions): 
     ` */`,
     `import * as Schema from "effect/Schema"`,
     `import * as AcpSchema from "../../AcpSchema.ts"`,
-    `import * as W from "../../internal/wire.ts"`,
+    `import * as Wire from "../../internal/wire.ts"`,
     ``,
     `/** Protocol version described by this module. */`,
     `export const version = ${input.version} as const`,
@@ -347,12 +382,12 @@ export const emitModule = (document: JsonSchemaDocument, options: EmitOptions): 
     if (reserved.has(name)) throw new UnsupportedSchemaError(name, "$defs", "definition name collides with a generated export")
     const override = overrides[name]
     const emitted = override ?? new Emitter(definitions, name).node(definitions[name])
-    const doc = docComment(definitions[name] as Json)
+    const doc = docComment(definitions[name])
     out.push(
       ``,
       override ? `// Reviewed override: ${override.reason.replaceAll("\n", " ")}` : "",
       `${doc}export type ${name} = ${emitted.ts}`,
-      `export const ${name} = W.def<${name}>(${str(name)}, ${emitted.schema})`
+      `export const ${name} = Wire.def<${name}>(${str(name)}, ${emitted.schema})`
     )
   }
   const methods = collectMethods(definitions)
@@ -370,4 +405,17 @@ export const emitModule = (document: JsonSchemaDocument, options: EmitOptions): 
     )
   }
   return out.filter((line, i, all) => !(line === "" && all[i - 1] === "")).join("\n") + "\n"
+}
+
+/** Collapse primitives that already include literal members; preserve runtime union validation. */
+const unionType = (members: ReadonlyArray<string>): string => {
+  if (members.includes("unknown")) return "unknown"
+  const broadString = members.includes("string")
+  const broadNumber = members.includes("number")
+  const retained = [...new Set(members)].filter((member) => {
+    if (broadString && /^"(?:[^"\\]|\\.)*"$/.test(member)) return false
+    if (broadNumber && /^-?\d+(?:\.\d+)?$/.test(member)) return false
+    return true
+  })
+  return retained.map((member) => `(${member})`).join(" | ")
 }

@@ -1,3 +1,7 @@
+import * as Schema from "effect/Schema"
+import { field } from "./support/field.ts"
+import { failure } from "./support/failure.ts"
+import * as Json from "../src/internal/json.ts"
 /**
  * Foundation conformance scenarios, run against the independent fixture agent
  * for both protocol versions over both in-memory and stdio compositions.
@@ -75,7 +79,7 @@ for (const [name, compose] of compositions) {
         const exit = yield* Effect.exit(Effect.scoped(
           AcpProtocol.connect(policy(2)).pipe(Effect.provide(composition.connector))
         ))
-        expect(Exit.isFailure(exit) && JSON.stringify(exit.cause)).toContain("AcpUnsupportedVersion")
+        expect(Exit.isFailure(exit) && (yield* Json.encode(exit.cause))).toContain("AcpUnsupportedVersion")
         yield* composition.released
       })), 20_000)
 
@@ -107,12 +111,12 @@ for (const [name, compose] of compositions) {
       test(`v${version}: malformed JSON, unknown methods, and mixed batches get JSON-RPC answers`, () =>
         run(Effect.gen(function*() {
           const { connection } = yield* open(compose, { version })
-          const report: any = yield* Effect.flatMap(connection.send("_fixture/malformed", {}), (p) => p.response)
-          expect(report.parse).toEqual({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } })
-          expect(report.unknown).toEqual({ jsonrpc: "2.0", id: "u-1", error: { code: -32601, message: "Method not found" } })
-          expect(report.batch.batch).toHaveLength(2)
-          expect(report.batch.batch).toContainEqual({ jsonrpc: "2.0", id: "b-1", result: { echo: true } })
-          expect(report.batch.batch).toContainEqual({
+          const report = yield* Effect.flatMap(connection.send("_fixture/malformed", {}), (p) => p.response)
+          expect(field(report, "parse")).toEqual({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } })
+          expect(field(report, "unknown")).toEqual({ jsonrpc: "2.0", id: "u-1", error: { code: -32601, message: "Method not found" } })
+          expect(field(report, "batch.batch")).toHaveLength(2)
+          expect(field(report, "batch.batch")).toContainEqual({ jsonrpc: "2.0", id: "b-1", result: { echo: true } })
+          expect(field(report, "batch.batch")).toContainEqual({
             jsonrpc: "2.0",
             id: null,
             error: { code: -32600, message: "Invalid Request" }
@@ -124,7 +128,7 @@ for (const [name, compose] of compositions) {
           const { connection } = yield* open(compose, { version })
           const pending = yield* connection.send("_fixture/slow", {})
           yield* connection.cancelRequest(pending.id)
-          expect(yield* Effect.flip(pending.response)).toMatchObject({ _tag: "AcpRemoteError", code: -32800 })
+          expect(yield* failure(pending.response)).toMatchObject({ _tag: "AcpRemoteError", code: -32800 })
         })), 20_000)
 
       test(`v${version}: only standard JSON-RPC reaches the wire`, () =>
@@ -134,7 +138,7 @@ for (const [name, compose] of compositions) {
           yield* connection.cancelRequest(pending.id)
           yield* Effect.ignore(pending.response)
           yield* Effect.flatMap(connection.send("_fixture/malformed", {}), (p) => p.response)
-          const { lines }: any = yield* Effect.flatMap(connection.send("_fixture/transcript", {}), (p) => p.response)
+          const { lines } = yield* Effect.flatMap(connection.send("_fixture/transcript", {}), (p) => p.response).pipe(Effect.flatMap(Schema.decodeUnknownEffect(Schema.Struct({ lines: Schema.Array(Schema.String) }))))
           expect(lines.length).toBeGreaterThan(4)
           for (const line of lines) expect({ line, standard: isStandardFrame(line) }).toEqual({ line, standard: true })
         })), 20_000)
@@ -144,7 +148,7 @@ for (const [name, compose] of compositions) {
           const { connection, composition } = yield* open(compose, { version })
           const pending = yield* connection.send("_fixture/slow", {})
           yield* connection.send("_fixture/crash", {})
-          expect(yield* Effect.flip(pending.response)).toMatchObject({ _tag: "AcpConnectionClosed" })
+          expect(yield* failure(pending.response)).toMatchObject({ _tag: "AcpConnectionClosed" })
           expect((yield* connection.closed)._tag).toBe("AcpConnectionClosed")
           expect(yield* connection.pendingRequests).toBe(0)
           yield* composition.released
@@ -155,7 +159,7 @@ for (const [name, compose] of compositions) {
           const { connection, composition, scope } = yield* open(compose, { version })
           const pending = yield* connection.send("_fixture/slow", {})
           yield* Scope.close(scope, Exit.void)
-          expect(yield* Effect.flip(pending.response)).toMatchObject({ _tag: "AcpConnectionClosed" })
+          expect(yield* failure(pending.response)).toMatchObject({ _tag: "AcpConnectionClosed" })
           yield* composition.released
         })), 20_000)
     }

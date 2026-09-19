@@ -1,0 +1,254 @@
+/**
+ * ACP over a WebSocket using the custom `effect-acp-jsonrpc-v1` profile.
+ *
+ * Each WebSocket message carries one complete UTF-8 JSON frame; there is no
+ * stdio newline delimiter. The profile versions framing only: it is negotiated
+ * independently of the ACP protocol version (v1 or v2), so the same connection
+ * carries either once `initialize` has selected it.
+ *
+ * The client dials through the injected `WebSocketConstructor` service, so this
+ * module stays browser-safe; the server side adapts an already-upgraded
+ * `Socket` (see `server/BridgeHttp`). Sockets are never reconnected implicitly
+ * and frames are never resent after loss: a socket failure or scope release is
+ * terminal for the transport.
+ *
+ */
+import * as Cause from "effect/Cause"
+import type * as Duration from "effect/Duration"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+import * as Queue from "effect/Queue"
+import * as Scope from "effect/Scope"
+import * as Stream from "effect/Stream"
+import * as Socket from "effect/unstable/socket/Socket"
+import { AcpTransportError } from "../AcpError.ts"
+import { AcpTransport, type Transport } from "../AcpTransport.ts"
+
+/** The WebSocket subprotocol this adapter negotiates. */
+export const profile = "effect-acp-jsonrpc-v1"
+
+/** Close code sent when a binary frame is received (Unsupported Data). */
+export const unsupportedDataClose = 1003
+/** Close code sent when a text frame exceeds the size limit (Message Too Big). */
+export const tooLargeClose = 1009
+
+export interface Options {
+  /** Largest text frame accepted or sent, in bytes. Default 16 MiB. */
+  readonly maxFrameBytes?: number | undefined
+  /** Frames buffered before reading pauses. Default 64. */
+  readonly buffer?: number | undefined
+  /** How long to wait for the socket to open. Passed to `Socket.fromWebSocket`. */
+  readonly openTimeout?: Duration.Input | undefined
+  /** Buffered bytes before a non-pausing socket fails. Passed to `Socket.fromWebSocket`. */
+  readonly highWaterMark?: number | undefined
+}
+
+const encoder = new TextEncoder()
+
+const frameBytes = (frame: string): number => encoder.encode(frame).byteLength
+
+const closedError = new AcpTransportError({ reason: "Closed", message: "WebSocket transport is closed" })
+
+const isClose = (error: Socket.SocketError): boolean => error.reason._tag === "SocketCloseError"
+
+const describe = (error: Socket.SocketError): string =>
+  error.reason._tag === "SocketCloseError" ? `Socket closed (${error.reason.code})` : error.message
+
+/** Parses a `Sec-WebSocket-Protocol` header and reports the profile amongst its offers. */
+export const requested = (headers: Readonly<Record<string, string | undefined>>): boolean => {
+  const header = headers["sec-websocket-protocol"]
+  if (header === undefined) return false
+  return header.split(",").some((token) => token.trim() === profile)
+}
+
+/**
+ * Adapts an Effect `Socket` to an `Transport`. Used by the server side for
+ * an already-upgraded socket and by `make` for a dialled one. The socket is
+ * acquired once and held for the transport's lifetime, so no reconnect occurs.
+ */
+export const fromSocket = <E, R>(
+  socket: Effect.Effect<Socket.Socket, E, R>,
+  options: Options = {}
+): Effect.Effect<Transport, AcpTransportError, R | Scope.Scope> =>
+  Effect.gen(function*() {
+    const maxFrameBytes = options.maxFrameBytes ?? 16 * 1024 * 1024
+    const scope = yield* Scope.Scope
+    const socketScope = yield* Scope.fork(scope)
+    let closed = false
+
+    const open = (cause: unknown) =>
+      new AcpTransportError({ reason: "Open", message: "WebSocket failed to open", cause })
+    const sock = yield* Scope.provide(socket, socketScope).pipe(Effect.mapError(open))
+    const reader = yield* Scope.provide(sock.reader, socketScope).pipe(Effect.mapError(open))
+    const writer = yield* Scope.provide(sock.writer, socketScope)
+
+    const closeWith = (code: number, reason: string) =>
+      writer.write(new Socket.CloseEvent(code, reason)).pipe(Effect.ignore)
+
+    yield* Scope.addFinalizer(socketScope, Effect.sync(() => {
+      closed = true
+    }))
+
+    const frames = yield* Queue.bounded<string, AcpTransportError | Cause.Done>(options.buffer ?? 64)
+
+    const pump = Effect.gen(function*() {
+      while (true) {
+        const batch = yield* reader.pull
+        for (const item of batch) {
+          if (typeof item !== "string") {
+            yield* closeWith(unsupportedDataClose, "Binary frames are not supported")
+            return yield* new AcpTransportError({
+              reason: "InvalidFrame",
+              message: "Binary WebSocket frames are not supported"
+            })
+          }
+          if (frameBytes(item) > maxFrameBytes) {
+            yield* closeWith(tooLargeClose, "Frame exceeds size limit")
+            return yield* new AcpTransportError({
+              reason: "FrameTooLarge",
+              message: `Frame exceeds ${maxFrameBytes} bytes`
+            })
+          }
+          yield* Queue.offer(frames, item)
+        }
+      }
+    })
+
+    yield* pump.pipe(
+      Effect.ensuring(Effect.sync(() => {
+        closed = true
+      })),
+      Effect.matchEffect({
+        onSuccess: () => Queue.end(frames),
+        onFailure: (error) => {
+          if (!Socket.isSocketError(error)) return Queue.fail(frames, error)
+          if (isClose(error)) return Queue.end(frames)
+          return Queue.fail(frames, new AcpTransportError({ reason: "Read", message: describe(error), cause: error }))
+        }
+      }),
+      Effect.forkIn(socketScope)
+    )
+
+    const transport: Transport = {
+      incoming: Stream.fromQueue(frames),
+      send: (frame) =>
+        Effect.suspend(() => {
+          if (closed) return Effect.fail(closedError)
+          if (frameBytes(frame) > maxFrameBytes) {
+            return Effect.fail(new AcpTransportError({
+              reason: "FrameTooLarge",
+              message: `Frame exceeds ${maxFrameBytes} bytes`
+            }))
+          }
+          return writer.write(frame).pipe(
+            Effect.mapError((error) => {
+              closed = true
+              return isClose(error)
+                ? closedError
+                : new AcpTransportError({ reason: "Write", message: describe(error), cause: error })
+            }),
+            Effect.tapError((error) => Queue.fail(frames, error))
+          )
+        })
+    }
+    return transport
+  })
+
+/**
+ * Dials `url` with the required subprotocol and returns a scoped transport.
+ * The connection is opened once; a missing/mismatched subprotocol, socket
+ * failure, or scope release is terminal.
+ */
+export const make = (
+  url: string | Effect.Effect<string>,
+  options: Options = {}
+): Effect.Effect<Transport, AcpTransportError, Socket.WebSocketConstructor | Scope.Scope> =>
+  Effect.gen(function*() {
+    const constructor = yield* Socket.WebSocketConstructor
+    const resolved = typeof url === "string" ? url : yield* url
+    const socket = Socket.fromWebSocket(
+      Effect.acquireRelease(
+        dial(constructor, resolved).pipe(Effect.interruptible, Effect.timeoutOrElse({
+          duration: options.openTimeout ?? "10 seconds", orElse: () => Effect.fail(openFailure("WebSocket open timeout"))
+        })),
+        (ws) => Effect.sync(() => ws.close(1000))
+      ),
+      { openTimeout: options.openTimeout, highWaterMark: options.highWaterMark }
+    )
+    return yield* fromSocket(socket, options)
+  })
+
+/** Dials and waits for open, rejecting a peer that did not select the profile. */
+const dial = (
+  constructor: (url: string, options?: Socket.WebSocketConstructorOptions) => Socket.WebSocketLike,
+  url: string
+): Effect.Effect<Socket.WebSocketLike, Socket.SocketError, Scope.Scope> =>
+  Effect.acquireRelease(
+    Effect.interruptible(Effect.callback<Socket.WebSocketLike, Socket.SocketError>((resume) => {
+      let ws: Socket.WebSocketLike
+      try {
+        ws = constructor(url, [profile])
+      } catch (cause) {
+        resume(Effect.fail(openFailure(cause)))
+        return
+      }
+      let settled = false
+      const remove = () => {
+        ws.removeEventListener("open", onOpen)
+        ws.removeEventListener("error", onError)
+        ws.removeEventListener("close", onClose)
+      }
+      const finish = (effect: Effect.Effect<Socket.WebSocketLike, Socket.SocketError>) => {
+        if (settled) return
+        settled = true
+        remove()
+        resume(effect)
+      }
+      const onOpen = () => finish(selected(ws).pipe(Effect.tapError(() => Effect.sync(() => ws.close(1002, "Subprotocol mismatch")))))
+      const onError = (event: Socket.WebSocketEvent) => finish(Effect.fail(openFailure(event)))
+      const onClose = (event: Socket.WebSocketEvent) =>
+        finish(Effect.fail(new Socket.SocketError({
+          reason: new Socket.SocketCloseError({
+            code: typeof event.code === "number" ? event.code : 1006,
+            ...(event.reason === undefined ? {} : { closeReason: event.reason })
+          })
+        })))
+      ws.addEventListener("open", onOpen, { once: true })
+      ws.addEventListener("error", onError, { once: true })
+      ws.addEventListener("close", onClose, { once: true })
+      if (ws.readyState === 1) onOpen()
+      return Effect.sync(() => {
+        if (!settled) {
+          settled = true
+          remove()
+          ws.close(1000)
+        }
+      })
+    })),
+    (ws) => Effect.sync(() => ws.close(1000))
+  )
+
+const openFailure = (cause: unknown): Socket.SocketError =>
+  new Socket.SocketError({ reason: new Socket.SocketOpenError({ kind: "Unknown", cause }) })
+
+const selected = (ws: Socket.WebSocketLike): Effect.Effect<Socket.WebSocketLike, Socket.SocketError> => {
+  const negotiated = "protocol" in ws ? ws.protocol : undefined
+  if (negotiated === profile) return Effect.succeed(ws)
+  let actual = "an invalid subprotocol value"
+  if (negotiated === undefined || negotiated === "") actual = "no subprotocol"
+  else if (typeof negotiated === "string") actual = `subprotocol "${negotiated}"`
+  return Effect.fail(openFailure(
+    new Error(`Peer selected ${actual}; expected "${profile}"`)
+  ))
+}
+
+/** A scoped WebSocket implementation of AcpTransport. */
+export const layer = (
+  url: string | Effect.Effect<string>,
+  options?: Options
+): Layer.Layer<AcpTransport, AcpTransportError, Socket.WebSocketConstructor> =>
+  Layer.effect(AcpTransport, make(url, options))
+
+/** Uses an injected accepted socket, e.g. after an HTTP upgrade. */
+export const layerSocket = (options?: Options): Layer.Layer<AcpTransport, AcpTransportError, Socket.Socket> =>
+  Layer.effect(AcpTransport, fromSocket(Socket.Socket, options))

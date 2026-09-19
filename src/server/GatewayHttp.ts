@@ -1,0 +1,48 @@
+import * as Schema from "effect/Schema"
+/** Authenticated Effect RPC WebSocket gateway, mounted in an existing router. */
+import * as Cause from "effect/Cause"
+import * as Effect from "effect/Effect"
+import * as Stream from "effect/Stream"
+import * as HttpRouter from "effect/unstable/http/HttpRouter"
+import * as Request from "effect/unstable/http/HttpServerRequest"
+import * as Response from "effect/unstable/http/HttpServerResponse"
+import * as RpcServer from "effect/unstable/rpc/RpcServer"
+import * as RpcSerialization from "effect/unstable/rpc/RpcSerialization"
+import * as AcpGateway from "../AcpGateway.ts"
+import { AcpHost } from "../AcpHost.ts"
+
+export interface Options<R = never> {
+  readonly path?: `/${string}`
+  readonly authenticate: (request: Request.HttpServerRequest) => Effect.Effect<AcpGateway.Identity, AcpGateway.GatewayError, R>
+  readonly allowOrigin: (origin: string | undefined) => boolean
+}
+export const route = <R>(options: Options<R>) => HttpRouter.route("GET", options.path ?? "/acp/gateway", Effect.gen(function*() {
+  const request = yield* Request.HttpServerRequest
+  if (!options.allowOrigin(request.headers.origin)) return Response.empty({ status: 403 })
+  const authenticated = yield* Effect.exit(options.authenticate(request))
+  if (authenticated._tag === "Failure") return Response.empty({ status: 401 })
+  const identity = authenticated.value
+  const host = yield* AcpHost
+  let compatible = false
+  const ready = Effect.suspend(() => compatible ? Effect.void : Effect.fail(AcpGateway.failure("UnsupportedVersion")))
+  const safeFailure = (cause: Cause.Cause<unknown>) => {
+    const error = Cause.squash(cause)
+    return Schema.is(AcpGateway.GatewayError)(error) ? AcpGateway.failure(error.code) : AcpGateway.failure("AgentFailure")
+  }
+  const protect = <A, E, R2>(effect: Effect.Effect<A, E, R2>) => effect.pipe(Effect.catchCause((cause) =>
+    Cause.hasInterruptsOnly(cause) ? Effect.failCause(Cause.fromReasons<never>(cause.reasons.filter(Cause.isInterruptReason))) : Effect.fail(safeFailure(cause))))
+  const handlers = AcpGateway.Gateway.toLayer({
+    Hello: (input) => protect(host.hello(identity, input).pipe(Effect.tap(() => Effect.sync(() => { compatible = true })))),
+    Admit: (input) => protect(ready.pipe(Effect.andThen(host.admit(identity, input)))),
+    Operation: (input) => protect(ready.pipe(Effect.andThen(host.operation(identity, input)))),
+    Closed: (input) => protect(ready.pipe(Effect.andThen(host.closed(identity, input)))),
+    List: (input) => protect(ready.pipe(Effect.andThen(host.list(identity, input)))),
+    Attach: (input) => Stream.unwrap(Effect.as(ready, host.attach(identity, input))).pipe(Stream.catchCause((cause) => Stream.fail(safeFailure(cause))))
+  })
+  // Public primitive underlying layerProtocolWebsocket. Construct per upgrade so
+  // authenticated identity is captured by handlers, never trusted from RPC payloads.
+  const { protocol, httpEffect } = yield* RpcServer.makeProtocolWithHttpEffectWebsocket.pipe(Effect.provide(RpcSerialization.layerNdjson))
+  yield* RpcServer.make(AcpGateway.Gateway, { disableTracing: true, disableFatalDefects: true }).pipe(
+    Effect.provideService(RpcServer.Protocol, protocol), Effect.provide(handlers), Effect.forkScoped)
+  return yield* httpEffect
+}))

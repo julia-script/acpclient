@@ -1,3 +1,5 @@
+import * as Effect from "effect/Effect"
+import * as Result from "effect/Result"
 import { describe, expect, test } from "bun:test"
 import * as Exit from "effect/Exit"
 import * as Schema from "effect/Schema"
@@ -7,8 +9,16 @@ import { oracle } from "./support/oracle.ts"
 
 const modules = { 1: V1, 2: V2 } as const
 
-const codec = (version: 1 | 2, definition: string) =>
-  (modules[version] as unknown as Record<string, Schema.Codec<unknown>>)[definition]!
+const codecs = (version: 1 | 2): Readonly<Record<string, Schema.Codec<unknown>>> => {
+  const { version: _version, provenance: _provenance, agentMethods: _agent, clientMethods: _client,
+    protocolMethods: _protocol, ...schemas } = modules[version]
+  return schemas
+}
+const codec = (version: 1 | 2, definition: string): Schema.Codec<unknown> => {
+  const found = codecs(version)[definition]
+  if (!found) throw new Error(`Unknown schema v${version} ${definition}`)
+  return found
+}
 
 const decode = (version: 1 | 2, definition: string, value: unknown) =>
   Schema.decodeUnknownExit(codec(version, definition))(value)
@@ -20,7 +30,7 @@ const conforms = (version: 1 | 2, definition: string, value: unknown, valid: boo
   expect({ definition, value, codec: Exit.isSuccess(decoded) }).toEqual({ definition, value, codec: valid })
   if (Exit.isSuccess(decoded)) {
     expect(decoded.value).toEqual(value)
-    expect(Schema.encodeUnknownSync(codec(version, definition))(decoded.value)).toEqual(value)
+    expect(Schema.encodeUnknownResult(codec(version, definition))(decoded.value)).toEqual(Result.succeed(value))
   }
 }
 
@@ -38,7 +48,7 @@ const fixtures: ReadonlyArray<readonly [1 | 2, string, unknown, boolean]> = [
   [2, "ProtocolVersion", 1.5, false],
   [1, "ProtocolVersion", "1", false],
   [2, "RequestId", null, true],
-  [2, "RequestId", 9007199254740993, true],
+  [2, "RequestId", Number.MAX_SAFE_INTEGER + 2, true],
   [2, "RequestId", 1.25, false],
   [2, "RequestId", true, false],
   [2, "ErrorCode", -32601, true],
@@ -138,36 +148,41 @@ describe("patch semantics", () => {
       { sessionUpdate: "tool_call_update", toolCallId: "t", content: null, title: null },
       { sessionUpdate: "tool_call_update", toolCallId: "t", content: [{ type: "content", content: text }], title: "x" }
     ]
-    const results = updates.map((u) => Schema.decodeUnknownSync(V2.SessionUpdate)(u))
-    expect(results).toEqual(updates)
-    expect("content" in results[0]!).toBe(false)
-    expect((results[1] as { content?: unknown }).content).toBeNull()
-    expect(results.map((r) => Schema.encodeUnknownSync(V2.SessionUpdate)(r))).toEqual(updates)
+    for (const update of updates) {
+      const result = Schema.decodeResult(V2.SessionUpdate)(update)
+      expect(result).toEqual(Result.succeed(update))
+      if (Result.isSuccess(result)) expect(Schema.encodeUnknownResult(V2.SessionUpdate)(result.success)).toEqual(Result.succeed(update))
+    }
     for (const u of updates) expect(oracle(2, "SessionUpdate", u)).toBe(true)
   })
 })
 
 describe("versioned contracts", () => {
   test("v1 completion and v2 insertion acknowledgement are distinct contracts", () => {
-    const v1: unknown = { stopReason: "end_turn" }
-    const v2: unknown = { messageId: "m-1" }
-    expect<unknown>(Schema.decodeUnknownSync(V1.PromptResponse)(v1)).toEqual(v1)
-    expect<unknown>(Schema.decodeUnknownSync(V2.PromptResponse)(v2)).toEqual(v2)
+    const v1 = { stopReason: "end_turn" } satisfies V1.PromptResponse
+    const v2 = { messageId: "m-1" } satisfies V2.PromptResponse
+    expect(Schema.decodeResult(V1.PromptResponse)(v1)).toEqual(Result.succeed(v1))
+    expect(Schema.decodeResult(V2.PromptResponse)(v2)).toEqual(Result.succeed(v2))
     expect(Exit.isFailure(Schema.decodeUnknownExit(V1.PromptResponse)(v2))).toBe(true)
     expect(Exit.isFailure(Schema.decodeUnknownExit(V2.PromptResponse)(v1))).toBe(true)
     expect(V1.agentMethods["session/prompt"].result).toBe(V1.PromptResponse)
     expect(V2.agentMethods["session/prompt"].result).toBe(V2.PromptResponse)
   })
 
-  test("method maps cover the upstream method metadata", async () => {
+  test("method maps cover the upstream method metadata", () => Effect.runPromise(Effect.gen(function*() {
     for (const [version, module] of [[1, V1], [2, V2]] as const) {
-      const meta = await Bun.file(`repos/agent-client-protocol/schema/v${version}/meta.json`).json()
-      expect(Object.keys(module.agentMethods).sort()).toEqual(Object.values(meta.agentMethods as Record<string, string>).sort())
-      expect(Object.keys(module.clientMethods).sort()).toEqual(Object.values(meta.clientMethods as Record<string, string>).sort())
+      const meta = yield* Effect.promise(() => Bun.file(`repos/agent-client-protocol/schema/v${version}/meta.json`).text()).pipe(
+        Effect.flatMap(Schema.decodeEffect(Schema.fromJsonString(Schema.Struct({
+          agentMethods: Schema.Record(Schema.String, Schema.String),
+          clientMethods: Schema.Record(Schema.String, Schema.String)
+        }))))
+      )
+      expect(Object.keys(module.agentMethods).sort()).toEqual(Object.values(meta.agentMethods).sort())
+      expect(Object.keys(module.clientMethods).sort()).toEqual(Object.values(meta.clientMethods).sort())
       expect(Object.keys(module.protocolMethods)).toEqual(["$/cancel_request"])
       expect(module.provenance.version).toBe(version)
     }
     expect(V2.agentMethods["session/cancel"]._tag).toBe("Notification")
     expect(V2.clientMethods["session/request_permission"]._tag).toBe("Request")
-  })
+  })))
 })

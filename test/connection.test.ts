@@ -1,3 +1,7 @@
+import { AcpTransport } from "../src/AcpTransport.ts"
+import { field } from "./support/field.ts"
+import { failure } from "./support/failure.ts"
+import * as Json from "../src/internal/json.ts"
 import { describe, expect, test } from "bun:test"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
@@ -26,7 +30,7 @@ const harness = (options?: AcpConnection.Options) =>
     const pair = yield* InMemory.make({ capacity: 64 })
     const connectionScope = yield* Scope.fork(scope)
     const driverScope = yield* Scope.fork(scope)
-    const connection = yield* Effect.flatMap(pair.left, (t) => AcpConnection.make(t, options)).pipe(Scope.provide(connectionScope))
+    const connection = yield* Effect.flatMap(pair.left, (t) => AcpConnection.make(options).pipe(Effect.provideService(AcpTransport, t))).pipe(Scope.provide(connectionScope))
     const peer = yield* Effect.flatMap(pair.right, driver).pipe(Scope.provide(driverScope))
     return { connection, peer, connectionScope, driverScope }
   })
@@ -58,7 +62,7 @@ describe("in-memory transport", () => {
       yield* Effect.yieldNow
       yield* Scope.close(rightScope, Exit.void)
       const writeExit = yield* Fiber.await(blockedWriter)
-      expect(Exit.isFailure(writeExit) && JSON.stringify(writeExit.cause)).toContain("Closed")
+      expect(Exit.isFailure(writeExit) && (yield* Json.encode(writeExit.cause))).toContain("Closed")
       expect(yield* Fiber.join(blockedReader)).toEqual([])
       expect(Exit.isFailure(yield* Effect.exit(left.send("after")))).toBe(true)
       void right
@@ -76,7 +80,7 @@ describe("envelopes and dispatch", () => {
       yield* peer.send("{not json")
       expect(yield* peer.next).toEqual({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } })
       yield* peer.send({ jsonrpc: "2.0", id: 3, method: 1 })
-      expect((yield* peer.next).error.code).toBe(-32600)
+      expect(field(yield* peer.next, "error.code")).toBe(-32600)
       yield* peer.send({ foo: 1 })
       expect(yield* peer.next).toEqual({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "Invalid Request" } })
       yield* peer.send({ jsonrpc: "1.0", id: 4, method: "test/echo", params: { text: "x" } })
@@ -152,18 +156,18 @@ describe("bidirectional requests", () => {
       expect(sent).toMatchObject({ jsonrpc: "2.0", id: 0, method: "session/prompt" })
       yield* peer.send({
         jsonrpc: "2.0",
-        id: sent.id,
+        id: field(sent, "id"),
         method: "session/request_permission",
         params: { sessionId: "s", title: "Run?", options: [{ optionId: "allow", name: "Allow", kind: "allow_once" }] }
       })
       expect(yield* peer.next).toEqual({ jsonrpc: "2.0", id: 0, result: { outcome: { outcome: "selected", optionId: "allow" } } })
-      yield* peer.send({ jsonrpc: "2.0", id: sent.id, result: { messageId: "m-1" } })
+      yield* peer.send({ jsonrpc: "2.0", id: field(sent, "id"), result: { messageId: "m-1" } })
       expect(yield* Fiber.join(prompt)).toEqual({ messageId: "m-1" })
     })))
 
   test("a handler can call back into the peer without deadlock", () =>
     run(Effect.gen(function*() {
-      const conn = yield* Deferred.make<AcpConnection.AcpConnection>()
+      const conn = yield* Deferred.make<AcpConnection.Service>()
       const { connection, peer } = yield* harness({
         handlers: AcpConnection.handlers([
           AcpConnection.onRequest(Echo, (params) =>
@@ -177,7 +181,7 @@ describe("bidirectional requests", () => {
       yield* peer.send({ jsonrpc: "2.0", id: 7, method: "test/echo", params: { text: "nested" } })
       const nested = yield* peer.next
       expect(nested).toMatchObject({ method: "test/echo", params: { text: "nested" } })
-      yield* peer.send({ jsonrpc: "2.0", id: nested.id, result: { text: "inner" } })
+      yield* peer.send({ jsonrpc: "2.0", id: field(nested, "id"), result: { text: "inner" } })
       expect(yield* peer.next).toEqual({ jsonrpc: "2.0", id: 7, result: { text: "inner" } })
     })))
 })
@@ -260,7 +264,7 @@ describe("batches", () => {
         { jsonrpc: "2.0", id: first.id, error: { code: -32002, message: "Resource not found" } }
       ])
       expect(yield* second.response).toEqual({ text: "2" })
-      const error = yield* Effect.flip(first.response)
+      const error = yield* failure(first.response)
       expect(error).toMatchObject({ _tag: "AcpRemoteError", code: -32002 })
       expect(yield* peer.poll(50)).toEqual(Option.none())
     })))
@@ -276,7 +280,7 @@ describe("cancellation, deadlines, capacity, and termination", () => {
       expect(yield* peer.next).toEqual({ jsonrpc: "2.0", method: "$/cancel_request", params: { requestId: pending.id } })
       expect(yield* connection.pendingRequests).toBe(1)
       yield* peer.send({ jsonrpc: "2.0", id: pending.id, error: { code: -32800, message: "Request cancelled" } })
-      expect(yield* Effect.flip(pending.response)).toMatchObject({ _tag: "AcpRemoteError", code: -32800 })
+      expect(yield* failure(pending.response)).toMatchObject({ _tag: "AcpRemoteError", code: -32800 })
     })))
 
   test("incoming $/cancel_request interrupts the handler and answers -32800", () =>
@@ -297,7 +301,7 @@ describe("cancellation, deadlines, capacity, and termination", () => {
       const call = yield* Effect.forkChild(connection.request(Echo, { text: "x" }, { timeout: "1 second" }))
       yield* peer.next
       yield* TestClock.adjust("2 seconds")
-      expect(yield* Effect.flip(Fiber.join(call))).toMatchObject({ _tag: "AcpTimeoutError", method: "test/echo", requestId: 0 })
+      expect(yield* failure(Fiber.join(call))).toMatchObject({ _tag: "AcpTimeoutError", method: "test/echo", requestId: 0 })
       expect(yield* connection.pendingRequests).toBe(1)
       yield* Effect.repeat(Effect.yieldNow, { times: 10 })
       expect(peer.received).toHaveLength(1)
@@ -321,7 +325,7 @@ describe("cancellation, deadlines, capacity, and termination", () => {
       const { connection, peer } = yield* harness({ handlers: {}, maxPendingRequests: 2 })
       yield* connection.send("a")
       yield* connection.send("b")
-      expect(yield* Effect.flip(connection.send("c"))).toMatchObject({ _tag: "AcpCapacityError", limit: 2 })
+      expect(yield* failure(connection.send("c"))).toMatchObject({ _tag: "AcpCapacityError", limit: 2 })
       yield* peer.next
       yield* peer.next
       expect(yield* peer.poll(50)).toEqual(Option.none())
@@ -336,7 +340,7 @@ describe("cancellation, deadlines, capacity, and termination", () => {
 
   test("nothing is admitted or dispatched after termination", () =>
     run(Effect.gen(function*() {
-      const executed: Array<unknown> = []
+      const executed: Array<import("../src/AcpSchema.ts").RequestId> = []
       const { connection, peer } = yield* harness({
         handlers: {
           request: (_method, _params, { id }) =>
@@ -357,7 +361,7 @@ describe("cancellation, deadlines, capacity, and termination", () => {
       const pair = yield* InMemory.make({ capacity: 1 })
       const transport = yield* pair.left
       yield* pair.right // never read
-      const connection = yield* AcpConnection.make(transport, { handlers: {} })
+      const connection = yield* AcpConnection.make({ handlers: {} }).pipe(Effect.provideService(AcpTransport, transport))
       yield* connection.send("fills-the-buffer")
       const result = yield* connection.request(Echo, { text: "x" }, { timeout: "10 millis" }).pipe(
         Effect.flip,
@@ -409,9 +413,9 @@ describe("cancellation, deadlines, capacity, and termination", () => {
       const call = yield* Effect.forkChild(connection.request(Echo, { text: "x" }))
       yield* peer.next
       yield* Scope.close(driverScope, Exit.void)
-      expect(yield* Effect.flip(Fiber.join(call))).toMatchObject({ _tag: "AcpConnectionClosed" })
+      expect(yield* failure(Fiber.join(call))).toMatchObject({ _tag: "AcpConnectionClosed" })
       expect((yield* connection.closed)._tag).toBe("AcpConnectionClosed")
-      expect(yield* Effect.flip(connection.request(Echo, { text: "y" }))).toMatchObject({ _tag: "AcpConnectionClosed" })
+      expect(yield* failure(connection.request(Echo, { text: "y" }))).toMatchObject({ _tag: "AcpConnectionClosed" })
       expect(yield* connection.pendingRequests).toBe(0)
     })))
 
@@ -425,7 +429,55 @@ describe("cancellation, deadlines, capacity, and termination", () => {
       const call = yield* Effect.forkChild(connection.request(Echo, { text: "x" }))
       yield* peer.next
       yield* Scope.close(connectionScope, Exit.void)
-      expect(yield* Effect.flip(Fiber.join(call))).toMatchObject({ _tag: "AcpConnectionClosed" })
+      expect(yield* failure(Fiber.join(call))).toMatchObject({ _tag: "AcpConnectionClosed" })
       yield* Deferred.await(released)
     })))
 })
+
+describe("JSON encoding failures", () => {
+  test("invalid outgoing data fails with AcpProtocolError and releases pending capacity", () => run(Effect.gen(function*() {
+    const { connection, peer } = yield* harness({ maxPendingRequests: 1, handlers: {} })
+    const circular: Record<string, unknown> = {}
+    circular.self = circular
+    expect(yield* failure(connection.send("_circular", circular))).toMatchObject({ _tag: "AcpProtocolError" })
+    expect(yield* connection.pendingRequests).toBe(0)
+    expect(yield* failure(connection.notifyRaw("_bigint", { value: 1n }))).toMatchObject({ _tag: "AcpProtocolError" })
+    expect(yield* peer.poll()).toEqual(Option.none())
+    const sent = yield* connection.send("_valid", {})
+    expect(yield* peer.next).toMatchObject({ id: sent.id, method: "_valid" })
+    yield* peer.send({ jsonrpc: "2.0", id: sent.id, result: "ok" })
+    expect(yield* sent.response).toBe("ok")
+  })))
+
+  test("non-serializable handler results produce an Internal error without losing batch siblings", () => run(Effect.gen(function*() {
+    const circular: Record<string, unknown> = {}
+    circular.self = circular
+    const { peer } = yield* harness({ handlers: { request: (method) => Effect.succeed(method === "_bad" ? circular : "ok") } })
+    yield* peer.send([
+      { jsonrpc: "2.0", id: 1, method: "_bad" },
+      { jsonrpc: "2.0", id: 2, method: "_good" }
+    ])
+    expect(yield* peer.next).toEqual([
+      { jsonrpc: "2.0", id: 1, error: { code: -32603, message: "Internal error" } },
+      { jsonrpc: "2.0", id: 2, result: "ok" }
+    ])
+  })))
+})
+
+test("draining notifications waits for handlers without blocking response delivery", () => run(Effect.gen(function*() {
+  const entered = yield* Deferred.make<void>()
+  const release = yield* Deferred.make<void>()
+  const { connection, peer } = yield* harness({ handlers: {
+    notification: () => Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release)))
+  } })
+  const request = yield* connection.send("test/echo", {})
+  yield* peer.next
+  yield* peer.send({ jsonrpc: "2.0", method: "test/ping", params: {} })
+  yield* Deferred.await(entered)
+  const drain = yield* Effect.forkChild(connection.drainNotifications)
+  yield* peer.send({ jsonrpc: "2.0", id: request.id, result: "answered" })
+  expect(yield* request.response).toBe("answered")
+  expect(drain.pollUnsafe()).toBeUndefined()
+  yield* Deferred.succeed(release, undefined)
+  yield* Fiber.join(drain)
+})))

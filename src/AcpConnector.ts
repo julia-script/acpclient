@@ -1,22 +1,28 @@
-/**
- * Service that opens scoped ACP transports: a spawned process, a socket, or
- * an application-provided adapter.
- *
- * @since 0.1.0
- */
+/** A factory for fresh scoped connections built from a transport Layer. */
 import * as Context from "effect/Context"
-import type * as Effect from "effect/Effect"
+import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
-import type * as Scope from "effect/Scope"
+import * as Scope from "effect/Scope"
 import type { AcpTransportError } from "./AcpError.ts"
-import type { AcpTransport } from "./AcpTransport.ts"
+import { AcpTransport, type Transport } from "./AcpTransport.ts"
 
 export class AcpConnector extends Context.Service<AcpConnector, {
-  /** Opens a transport owned by the caller's scope. */
-  readonly connect: Effect.Effect<AcpTransport, AcpTransportError, Scope.Scope>
+  /** Opens a fresh transport, owned by the caller's scope. */
+  readonly connect: Effect.Effect<Transport, AcpTransportError, Scope.Scope>
 }>()("effect-acp/AcpConnector") {}
 
-/** Builds a connector layer from a scoped transport factory. */
-export const layer = (
-  connect: Effect.Effect<AcpTransport, AcpTransportError, Scope.Scope>
-): Layer.Layer<AcpConnector> => Layer.succeed(AcpConnector, AcpConnector.of({ connect }))
+/**
+ * Captures the platform dependencies without opening a connection. Every
+ * connect builds a fresh transport layer in that call's scope; neither layer
+ * memoization nor sibling connections can share or prematurely close it.
+ */
+export const layer = <R>(transport: Layer.Layer<AcpTransport, AcpTransportError, R>): Layer.Layer<AcpConnector, never, R> =>
+  Layer.effect(AcpConnector, Effect.gen(function*() {
+    const services = yield* Effect.context<R>()
+    return AcpConnector.of({
+      connect: Effect.flatMap(Scope.Scope, (scope) => Layer.buildWithScope(Layer.fresh(transport), scope).pipe(
+        Effect.provideContext(services),
+        Effect.map((context) => Context.get(context, AcpTransport))
+      ))
+    })
+  }))

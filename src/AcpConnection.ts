@@ -1,13 +1,16 @@
+import * as ResultValue from "effect/Result"
+import * as Json from "./internal/json.ts"
 /**
- * Role-neutral ACP JSON-RPC peer over an `AcpTransport`.
+ * Role-neutral ACP JSON-RPC peer over the `AcpTransport` service.
  *
  * Either side may send requests and notifications while others are pending.
  * Responses correlate by ID per direction, so an incoming and an outgoing
  * request may share an ID. Incoming requests run in their own scoped fibers;
  * incoming notifications are handled one at a time in arrival order.
  *
- * @since 0.1.0
  */
+import * as Context from "effect/Context"
+import * as Layer from "effect/Layer"
 import * as Cause from "effect/Cause"
 import * as Deferred from "effect/Deferred"
 import type * as Duration from "effect/Duration"
@@ -28,7 +31,7 @@ import {
   type AcpTransportError
 } from "./AcpError.ts"
 import { ErrorCode, type NotificationMethod, type Params, type RequestId, type RequestMethod, type Result } from "./AcpSchema.ts"
-import type { AcpTransport } from "./AcpTransport.ts"
+import { AcpTransport } from "./AcpTransport.ts"
 import * as JsonRpc from "./internal/jsonRpc.ts"
 
 // -----------------------------------------------------------------------------
@@ -76,7 +79,9 @@ export const onRequest = <D extends RequestMethod>(
         new AcpRemoteError({ code: ErrorCode.InvalidParams, message: "Invalid params", data: { details: error.message } })
       ),
       Effect.flatMap((decoded) => handler(decoded, context)),
-      Effect.flatMap((result) => Effect.orDie(Schema.encodeUnknownEffect(method.result)(result)))
+      Effect.flatMap((result) => Schema.encodeUnknownEffect(method.result)(result).pipe(
+        Effect.mapError(() => new AcpRemoteError({ code: ErrorCode.InternalError, message: "Internal error" }))
+      ))
     )
 })
 
@@ -148,7 +153,7 @@ export interface PendingRequest {
   readonly response: Effect.Effect<unknown, AcpRemoteError | AcpProtocolError | AcpConnectionClosed>
 }
 
-export interface AcpConnection {
+export interface Service {
   /** Sends a declared request and decodes its result. */
   readonly request: <D extends RequestMethod>(
     method: D,
@@ -169,22 +174,24 @@ export interface AcpConnection {
   readonly send: (
     method: string,
     params?: unknown
-  ) => Effect.Effect<PendingRequest, AcpConnectionClosed | AcpCapacityError>
+  ) => Effect.Effect<PendingRequest, AcpConnectionClosed | AcpCapacityError | AcpProtocolError>
   /** Sends a declared notification. */
   readonly notify: <D extends NotificationMethod>(
     method: D,
     params: Params<D>
   ) => Effect.Effect<void, AcpConnectionClosed | AcpProtocolError>
   /** Sends a raw notification. */
-  readonly notifyRaw: (method: string, params?: unknown) => Effect.Effect<void, AcpConnectionClosed>
+  readonly notifyRaw: (method: string, params?: unknown) => Effect.Effect<void, AcpConnectionClosed | AcpProtocolError>
   /**
    * Asks the peer to cancel an outgoing request (`$/cancel_request`). The
    * request remains pending until the peer responds, typically with a
    * Request cancelled error.
    */
-  readonly cancelRequest: (id: RequestId) => Effect.Effect<void, AcpConnectionClosed>
+  readonly cancelRequest: (id: RequestId) => Effect.Effect<void, AcpConnectionClosed | AcpProtocolError>
   /** Installs or replaces incoming handlers and releases waiting incoming messages. */
   readonly setHandlers: (handlers: Handlers) => Effect.Effect<void>
+  /** Waits for notifications already queued to finish dispatching. Never call from a notification handler. */
+  readonly drainNotifications: Effect.Effect<void, AcpConnectionClosed>
   /** Number of outgoing requests awaiting a response. */
   readonly pendingRequests: Effect.Effect<number>
   /** Completes with the terminal reason once the connection has terminated. */
@@ -199,7 +206,8 @@ const closedByTransport = (error: AcpTransportError) =>
  * pending calls fail with `AcpConnectionClosed` and handler fibers are
  * interrupted. The transport itself is released by its own scope.
  */
-export const make = Effect.fnUntraced(function*(transport: AcpTransport, options: Options = {}) {
+export const make = Effect.fnUntraced(function*(options: Options = {}) {
+  const transport = yield* AcpTransport
   const scope = yield* Scope.Scope
   const maxPending = options.maxPendingRequests ?? 1024
   const maxIncoming = options.maxIncomingRequests ?? 256
@@ -214,7 +222,10 @@ export const make = Effect.fnUntraced(function*(transport: AcpTransport, options
   const ready = yield* Deferred.make<void>()
   if (current) yield* Deferred.succeed(ready, undefined)
   const fibers = yield* FiberSet.make<void, never>()
-  const notifications = yield* Queue.bounded<{ readonly method: string; readonly params: unknown }>(
+  const notifications = yield* Queue.bounded<
+    | { readonly _tag: "Notification"; readonly method: string; readonly params: unknown }
+    | { readonly _tag: "Barrier"; readonly completed: Deferred.Deferred<void> }
+  >(
     options.notificationBuffer ?? 256
   )
 
@@ -233,9 +244,12 @@ export const make = Effect.fnUntraced(function*(transport: AcpTransport, options
   // Used from fibers inside `fibers`, which must not interrupt themselves.
   const terminateLater = (reason: AcpConnectionClosed) => Effect.asVoid(Effect.forkIn(terminate(reason), scope))
 
-  const write = (message: JsonRpc.Outgoing | ReadonlyArray<JsonRpc.Outgoing>): Effect.Effect<void, AcpConnectionClosed> =>
-    Effect.suspend((): Effect.Effect<void, AcpTransportError | AcpConnectionClosed> =>
-      terminated ? Effect.fail(terminated) : transport.send(JSON.stringify(message))
+  const write = (message: JsonRpc.Outgoing | ReadonlyArray<JsonRpc.Outgoing>): Effect.Effect<void, AcpConnectionClosed | AcpProtocolError> =>
+    Effect.suspend((): Effect.Effect<void, AcpConnectionClosed | AcpProtocolError | AcpTransportError> =>
+      terminated ? Effect.fail(terminated) : Json.encode(message).pipe(
+        Effect.mapError((cause) => new AcpProtocolError({ message: "Cannot encode JSON-RPC message", cause })),
+        Effect.flatMap(transport.send)
+      )
     ).pipe(
       Effect.catchTag("AcpTransportError", (error) => {
         const reason = closedByTransport(error)
@@ -245,8 +259,8 @@ export const make = Effect.fnUntraced(function*(transport: AcpTransport, options
 
   // --- outgoing ---------------------------------------------------------------
 
-  const send = (method: string, params?: unknown): Effect.Effect<PendingRequest, AcpConnectionClosed | AcpCapacityError> =>
-    Effect.suspend((): Effect.Effect<PendingRequest, AcpConnectionClosed | AcpCapacityError> => {
+  const send = (method: string, params?: unknown): Effect.Effect<PendingRequest, AcpConnectionClosed | AcpCapacityError | AcpProtocolError> =>
+    Effect.suspend((): Effect.Effect<PendingRequest, AcpConnectionClosed | AcpCapacityError | AcpProtocolError> => {
       if (terminated) return Effect.fail(terminated)
       if (pending.size >= maxPending) {
         return Effect.fail(new AcpCapacityError({ resource: "pendingRequests", limit: maxPending }))
@@ -278,7 +292,7 @@ export const make = Effect.fnUntraced(function*(transport: AcpTransport, options
       })
     })
 
-  const request = <D extends RequestMethod>(method: D, params: Params<D>, requestOptions?: RequestOptions) =>
+  const request = <M extends string, P, A>(method: RequestMethod<M, P, A>, params: P, requestOptions?: RequestOptions) =>
     Effect.gen(function*() {
       const encoded = yield* Schema.encodeUnknownEffect(method.params)(params).pipe(
         Effect.mapError((error) => new AcpProtocolError({ message: `Invalid ${method.method} params: ${error.message}` }))
@@ -289,7 +303,7 @@ export const make = Effect.fnUntraced(function*(transport: AcpTransport, options
           new AcpProtocolError({ message: `Invalid ${method.method} result: ${error.message}`, cause: error })
         )
       )
-    }) as Effect.Effect<Result<D>, AcpRequestError | AcpTimeoutError>
+    })
 
   const notifyRaw = (method: string, params?: unknown) => write(JsonRpc.notification(method, params))
 
@@ -301,7 +315,7 @@ export const make = Effect.fnUntraced(function*(transport: AcpTransport, options
 
   // --- incoming ---------------------------------------------------------------
 
-  const settle = (id: RequestId, settleWith: (deferred: Deferred.Deferred<unknown, any>) => Effect.Effect<boolean>) =>
+  const settle = (id: RequestId, settleWith: (deferred: Deferred.Deferred<unknown, AcpRemoteError | AcpProtocolError | AcpConnectionClosed>) => Effect.Effect<boolean>) =>
     Effect.suspend(() => {
       const deferred = pending.get(id)
       if (!deferred) return Effect.logWarning("Ignored response for unknown request id", id)
@@ -326,8 +340,13 @@ export const make = Effect.fnUntraced(function*(transport: AcpTransport, options
           : Effect.map(effect, (result) => JsonRpc.success(id, result))
       })),
       Effect.catchTag("AcpRemoteError", (error) => Effect.succeed(JsonRpc.failure(id, error.code, error.message, error.data))),
-      Effect.catchCause((cause) =>
-        Cause.hasInterruptsOnly(cause) ? Effect.failCause(cause) : Effect.logError(`Handler for ${method} failed`, cause).pipe(
+      Effect.flatMap((message) => Json.encode(message).pipe(
+        Effect.as(message),
+        Effect.catchTag("SchemaError", (error) => Effect.logError(`Handler for ${method} returned non-serializable data`, error).pipe(
+          Effect.as(JsonRpc.failure(id, ErrorCode.InternalError, "Internal error"))
+        ))
+      )),
+      Effect.catchCauseIf((cause) => !Cause.hasInterruptsOnly(cause), (cause) => Effect.logError(`Handler for ${method} failed`, cause).pipe(
           Effect.as(JsonRpc.failure(id, ErrorCode.InternalError, "Internal error"))
         )
       )
@@ -339,7 +358,7 @@ export const make = Effect.fnUntraced(function*(transport: AcpTransport, options
   }
 
   /** Handles one message; returns the effect producing its response, if one is owed. */
-  const handleEntry = (entry: unknown): Effect.Effect<Effect.Effect<JsonRpc.Outgoing> | undefined> =>
+  const handleEntry = (entry: Schema.Json): Effect.Effect<Effect.Effect<JsonRpc.Outgoing> | undefined> =>
     Effect.suspend(() => {
       const message = JsonRpc.classify(entry)
       switch (message._tag) {
@@ -358,11 +377,11 @@ export const make = Effect.fnUntraced(function*(transport: AcpTransport, options
             )
         case "Notification": {
           if (message.method === "$/cancel_request") {
-            const target = (message.params as { readonly requestId?: unknown } | null)?.requestId
+            const target = typeof message.params === "object" && message.params !== null && "requestId" in message.params ? message.params.requestId : undefined
             const cancelled = JsonRpc.isRequestId(target) ? active.get(target) : undefined
             return Effect.as(cancelled ? Deferred.succeed(cancelled, undefined) : Effect.void, undefined)
           }
-          return Effect.as(Queue.offer(notifications, { method: message.method, params: message.params }), undefined)
+          return Effect.as(Queue.offer(notifications, { _tag: "Notification", method: message.method, params: message.params }), undefined)
         }
         case "Invalid":
           return Effect.succeed(Effect.succeed(JsonRpc.failure(null, ErrorCode.InvalidRequest, "Invalid Request")))
@@ -392,12 +411,11 @@ export const make = Effect.fnUntraced(function*(transport: AcpTransport, options
   const onFrame = (frame: string): Effect.Effect<void> =>
     Effect.suspend(() => {
       if (terminated) return Effect.void
-      let parsed: unknown
-      try {
-        parsed = JSON.parse(frame)
-      } catch {
+      const decoded = Json.decodeResult(frame)
+      if (ResultValue.isFailure(decoded)) {
         return respond([Effect.succeed(JsonRpc.failure(null, ErrorCode.ParseError, "Parse error"))], false)
       }
+      const parsed = decoded.success
       if (!Array.isArray(parsed)) {
         return Effect.flatMap(handleEntry(parsed), (response) => respond(response ? [response] : [], false))
       }
@@ -410,14 +428,15 @@ export const make = Effect.fnUntraced(function*(transport: AcpTransport, options
     })
 
   const dispatchNotifications = Queue.take(notifications).pipe(
-    Effect.flatMap(({ method, params }) =>
-      Deferred.await(ready).pipe(
+    Effect.flatMap((entry) => {
+      if (entry._tag === "Barrier") return Deferred.succeed(entry.completed, undefined)
+      const { method, params } = entry
+      return Deferred.await(ready).pipe(
         Effect.andThen(Effect.suspend(() => current?.notification?.(method, params) ?? Effect.void)),
-        Effect.catchCause((cause) =>
-          Cause.hasInterruptsOnly(cause) ? Effect.failCause(cause) : Effect.logWarning(`Notification handler for ${method} failed`, cause)
+        Effect.catchCauseIf((cause) => !Cause.hasInterruptsOnly(cause), (cause) => Effect.logWarning(`Notification handler for ${method} failed`, cause)
         )
       )
-    ),
+    }),
     Effect.forever,
     Effect.ignore
   )
@@ -438,7 +457,7 @@ export const make = Effect.fnUntraced(function*(transport: AcpTransport, options
   // Added last so it runs first: pending calls fail before fibers are interrupted.
   yield* Scope.addFinalizer(scope, terminate(new AcpConnectionClosed({ message: "Connection closed" })))
 
-  const connection: AcpConnection = {
+  const connection: Service = {
     request,
     requestRaw,
     send,
@@ -450,8 +469,20 @@ export const make = Effect.fnUntraced(function*(transport: AcpTransport, options
         current = handlers
         return Effect.asVoid(Deferred.succeed(ready, undefined))
       }),
+    drainNotifications: Effect.raceFirst(Effect.gen(function*() {
+      const completed = yield* Deferred.make<void>()
+      yield* Queue.offer(notifications, { _tag: "Barrier", completed })
+      yield* Deferred.await(completed)
+    }), Effect.flatMap(Deferred.await(done), Effect.fail)),
     pendingRequests: Effect.sync(() => pending.size),
     closed: Deferred.await(done)
   }
   return connection
 })
+
+/** The role-neutral JSON-RPC connection capability. */
+export class AcpConnection extends Context.Service<AcpConnection, Service>()("effect-acp/AcpConnection") {}
+
+/** Starts a connection over the supplied scoped transport service. */
+export const layer = (options?: Options): Layer.Layer<AcpConnection, never, AcpTransport> =>
+  Layer.effect(AcpConnection, make(options))

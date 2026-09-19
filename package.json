@@ -10,26 +10,50 @@
     "./AcpTransport": "./src/AcpTransport.ts",
     "./AcpConnector": "./src/AcpConnector.ts",
     "./AcpConnection": "./src/AcpConnection.ts",
+    "./AcpApp": "./src/AcpApp.ts",
+    "./AcpSessionError": "./src/AcpSessionError.ts",
+    "./AcpClient": "./src/AcpClient.ts",
+    "./AcpLocalClient": "./src/AcpLocalClient.ts",
+    "./AcpSessionState": "./src/AcpSessionState.ts",
+    "./AcpBridge": "./src/AcpBridge.ts",
+    "./AcpAgent": "./src/AcpAgent.ts",
+    "./agent/Store": "./src/agent/Store.ts",
+    "./agent/Content": "./src/agent/Content.ts",
     "./protocol/v1": "./src/protocol/v1/Schema.ts",
     "./protocol/v2": "./src/protocol/v2/Schema.ts",
     "./transport/InMemory": "./src/transport/InMemory.ts",
-    "./transport/Stdio": "./src/transport/Stdio.ts"
+    "./transport/Stdio": "./src/transport/Stdio.ts",
+    "./transport/WebSocket": "./src/transport/WebSocket.ts",
+    "./transport/ProcessStdio": "./src/transport/ProcessStdio.ts",
+    "./server": "./src/server/BridgeHttp.ts",
+    "./AcpHost": "./src/AcpHost.ts",
+    "./AcpGateway": "./src/AcpGateway.ts",
+    "./AcpGatewayClient": "./src/AcpGatewayClient.ts",
+    "./AcpRemoteClient": "./src/AcpRemoteClient.ts",
+    "./server/GatewayHttp": "./src/server/GatewayHttp.ts",
+    "./server/BridgeHttp": "./src/server/BridgeHttp.ts"
   },
   "scripts": {
-    "prepare": "effect-tsgo patch",
+    "prepare": "effect-tsgo patch --typescript --oxlint",
     "generate": "bun scripts/codegen/generate.ts",
     "generate:check": "bun scripts/codegen/generate.ts --check",
     "typecheck": "tsc --noEmit -p .",
+    "lint": "oxlint --disable-nested-config --deny-warnings .",
+    "lint:fix": "oxlint --disable-nested-config --deny-warnings --fix .",
     "test": "bun test",
     "check:browser": "bun scripts/check-browser.ts",
-    "check": "bun run generate:check && bun run typecheck && bun test && bun run check:browser"
+    "check": "bun run generate:check && bun run typecheck && bun run lint && bun run check:docs && bun test && bun run check:browser",
+    "check:docs": "bun scripts/check-docs.ts"
   },
   "devDependencies": {
     "@effect/platform-bun": "4.0.0-rc.115",
     "@effect/platform-node": "4.0.0-rc.115",
-    "@effect/tsgo": "^0.45.0",
+    "@effect/tsgo": "0.45.0",
     "@types/bun": "latest",
-    "ajv": "^8"
+    "ajv": "^8",
+    "oxlint-tsgolint": "7.0.2001",
+    "oxlint": "1.82.0",
+    "typescript": "7.0.2"
   },
   "peerDependencies": {
     "typescript": "^7"

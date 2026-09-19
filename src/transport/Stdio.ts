@@ -1,3 +1,4 @@
+import * as Schema from "effect/Schema"
 /**
  * ACP over a spawned process's standard input and output.
  *
@@ -6,7 +7,6 @@
  * injected through `ChildProcessSpawner` (e.g. from `@effect/platform-node` or
  * `@effect/platform-bun`); importing this module starts nothing.
  *
- * @since 0.1.0
  */
 import * as Cause from "effect/Cause"
 import * as Deferred from "effect/Deferred"
@@ -19,9 +19,8 @@ import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import type * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { ChildProcessSpawner, type ExitCode } from "effect/unstable/process/ChildProcessSpawner"
-import { AcpConnector } from "../AcpConnector.ts"
 import { AcpTransportError } from "../AcpError.ts"
-import type { AcpTransport } from "../AcpTransport.ts"
+import { AcpTransport, type Transport } from "../AcpTransport.ts"
 import * as Framing from "../internal/framing.ts"
 
 export interface Options {
@@ -37,7 +36,7 @@ export interface Options {
   } | undefined
 }
 
-export interface StdioTransport extends AcpTransport {
+export interface StdioTransport extends Transport {
   readonly pid: number
   /** Completes when the process exits. */
   readonly exitCode: Effect.Effect<ExitCode, PlatformError.PlatformError>
@@ -151,22 +150,16 @@ export const make = Effect.fnUntraced(function*(command: ChildProcess.Command, o
     incoming,
     send: (frame) => {
       const bytes = Framing.encode(frame, maxFrameBytes)
-      if (bytes instanceof AcpTransportError) return Effect.fail(bytes)
+      if (Schema.is(AcpTransportError)(bytes)) return Effect.fail(bytes)
       return Effect.flatMap(Queue.offer(writes, bytes), (accepted) => accepted ? Effect.void : Effect.fail(closed))
     }
   }
   return transport
 })
 
-/** An `AcpConnector` that spawns `command` for each connection. */
+/** A scoped subprocess implementation of AcpTransport. */
 export const layer = (
   command: ChildProcess.Command,
   options?: Options
-): Layer.Layer<AcpConnector, never, ChildProcessSpawner> =>
-  Layer.effect(
-    AcpConnector,
-    Effect.map(Effect.service(ChildProcessSpawner), (spawner) =>
-      AcpConnector.of({
-        connect: make(command, options).pipe(Effect.provideService(ChildProcessSpawner, spawner))
-      }))
-  )
+): Layer.Layer<AcpTransport, AcpTransportError, ChildProcessSpawner> =>
+  Layer.effect(AcpTransport, make(command, options))

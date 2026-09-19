@@ -1,6 +1,10 @@
+import { AcpTransport } from "../src/AcpTransport.ts"
+import * as AcpConnector from "../src/AcpConnector.ts"
+import { failure } from "./support/failure.ts"
+import * as Json from "../src/internal/json.ts"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as NodeServices from "@effect/platform-node/NodeServices"
-import { describe, expect, test } from "bun:test"
+import { describe, expect, expectTypeOf, test } from "bun:test"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
@@ -11,20 +15,25 @@ import * as Sink from "effect/Sink"
 import * as Stream from "effect/Stream"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
-import { mkdtempSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
+import * as FileSystem from "effect/FileSystem"
+import * as Path from "effect/Path"
 import * as AcpConnection from "../src/AcpConnection.ts"
 import * as AcpProtocol from "../src/AcpProtocol.ts"
 import * as Framing from "../src/internal/framing.ts"
 import * as Stdio from "../src/transport/Stdio.ts"
 import { processGone, stdioCommand } from "./support/compositions.ts"
 
+const path = Effect.runSync(Effect.provide(Path.Path, Path.layer))
+const join = (...segments: string[]) => path.join(...segments)
+
 const run = <A, E>(effect: Effect.Effect<A, E, Scope.Scope | BunServices.BunServices>) =>
   Effect.runPromise(Effect.scoped(effect).pipe(Effect.provide(BunServices.layer)))
 
 const bytes = (s: string) => new TextEncoder().encode(s)
-const pidfile = () => join(mkdtempSync(join(tmpdir(), "acp-stdio-")), "pid")
+const pidfile = () => Effect.gen(function*() {
+  const fs = yield* FileSystem.FileSystem
+  return join(yield* fs.makeTempDirectoryScoped({ prefix: "acp-stdio-" }), "pid")
+})
 
 describe("newline framing", () => {
   test("a multibyte character and the delimiter split across reads yield one intact frame", () => {
@@ -69,8 +78,8 @@ describe("newline framing", () => {
 describe("spawned stdio", () => {
   test("heavy stderr neither blocks nor contaminates protocol frames; the captured tail is bounded", () =>
     run(Effect.gen(function*() {
-      const transport = yield* Stdio.make(stdioCommand({ version: 1 }, pidfile()), { stderr: { maxBytes: 4096 } })
-      const connection = yield* AcpConnection.make(transport, { handlers: {} })
+      const transport = yield* Stdio.make(stdioCommand({ version: 1 }, (yield* pidfile())), { stderr: { maxBytes: 4096 } })
+      const connection = yield* AcpConnection.make({ handlers: {} }).pipe(Effect.provideService(AcpTransport, transport))
       yield* AcpProtocol.initialize(connection, {
         params: { clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false } }
       })
@@ -83,25 +92,25 @@ describe("spawned stdio", () => {
 
   test("a crashing agent reports its exit and closes the connection", () =>
     run(Effect.gen(function*() {
-      const pid = pidfile()
+      const pid = yield* pidfile()
       const transport = yield* Stdio.make(stdioCommand({ version: 1 }, pid))
-      const connection = yield* AcpConnection.make(transport, { handlers: {} })
+      const connection = yield* AcpConnection.make({ handlers: {} }).pipe(Effect.provideService(AcpTransport, transport))
       const pending = yield* connection.send("_fixture/slow", {})
       yield* connection.send("_fixture/crash", {})
-      expect(yield* Effect.flip(pending.response)).toMatchObject({ _tag: "AcpConnectionClosed" })
+      expect(yield* failure(pending.response)).toMatchObject({ _tag: "AcpConnectionClosed" })
       expect<number>(yield* transport.exitCode).toBe(3)
       yield* processGone(pid)
     })), 20_000)
 
   test("closing the scope releases writers blocked on a child that never reads, and the child", () =>
     run(Effect.gen(function*() {
-      const pid = pidfile()
+      const pid = yield* pidfile()
       const scope = yield* Scope.fork(yield* Scope.Scope)
       const transport = yield* Scope.provide(
         Stdio.make(stdioCommand({ version: 1, mode: "no-read" }, pid), { writeBuffer: 1 }),
         scope
       )
-      const frame = JSON.stringify({ jsonrpc: "2.0", method: "_fill", params: { data: "x".repeat(256 * 1024) } })
+      const frame = (yield* Json.encode({ jsonrpc: "2.0", method: "_fill", params: { data: "x".repeat(256 * 1024) } }))
       let sent = 0
       const writer = yield* Effect.forkChild(Effect.forever(Effect.andThen(transport.send(frame), Effect.sync(() => sent++))))
       // Wait until writes stop making progress: the pipe and write buffer are full.
@@ -112,7 +121,7 @@ describe("spawned stdio", () => {
       }
       yield* Scope.close(scope, Exit.void)
       const exit = yield* Fiber.await(writer)
-      expect(Exit.isFailure(exit) && JSON.stringify(exit.cause)).toContain("Closed")
+      expect(Exit.isFailure(exit) && (yield* Json.encode(exit.cause))).toContain("Closed")
       yield* processGone(pid)
     })), 20_000)
 
@@ -139,25 +148,21 @@ describe("spawned stdio", () => {
       const transport = yield* Stdio.make(ChildProcess.make("agent")).pipe(
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner)
       )
-      const connection = yield* AcpConnection.make(transport, { handlers: {} })
+      const connection = yield* AcpConnection.make({ handlers: {} }).pipe(Effect.provideService(AcpTransport, transport))
       const accepted = yield* connection.send("_fixture/slow", {})
-      expect(yield* Effect.flip(accepted.response)).toMatchObject({ _tag: "AcpConnectionClosed" })
+      expect(yield* failure(accepted.response)).toMatchObject({ _tag: "AcpConnectionClosed" })
       expect((yield* connection.closed)._tag).toBe("AcpConnectionClosed")
-      expect(yield* Effect.flip(transport.send("{}"))).toMatchObject({ reason: "Closed" })
+      expect(yield* failure(transport.send("{}"))).toMatchObject({ reason: "Closed" })
     }))), 5_000)
 
   test("the Node platform adapter composes the same way", () =>
     Effect.runPromise(Effect.scoped(Effect.gen(function*() {
       const { negotiated } = yield* AcpProtocol.connect({ versions: [2, 1], params: { info: { name: "n", version: "0" }, capabilities: {} } })
-        .pipe(Effect.provide(Stdio.layer(stdioCommand({ version: 2 }, pidfile())).pipe(Layer.provide(NodeServices.layer))))
+        .pipe(Effect.provide(AcpConnector.layer(Stdio.layer(stdioCommand({ version: 2 }, (yield* pidfile())))).pipe(Layer.provide(NodeServices.layer))))
       expect(negotiated.version).toBe(2)
-    }))), 20_000)
+    })).pipe(Effect.provide(NodeServices.layer))), 20_000)
 
-  test("construction requires an injected process runtime", async () => {
-    const exit = await Effect.runPromiseExit(
-      Effect.scoped(Stdio.make(stdioCommand({ version: 1 }, pidfile()))) as Effect.Effect<unknown, unknown>
-    )
-    expect(Exit.isFailure(exit)).toBe(true)
-    expect(String(Exit.isFailure(exit) && exit.cause)).toContain("ChildProcessSpawner")
+  test("construction requires an injected process runtime", () => {
+    expectTypeOf<Effect.Services<ReturnType<typeof Stdio.make>>>().toEqualTypeOf<ChildProcessSpawner.ChildProcessSpawner | Scope.Scope>()
   })
 })

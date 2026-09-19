@@ -3,11 +3,13 @@
  *
  * @internal
  */
-import type { ErrorObject, RequestId } from "../AcpSchema.ts"
+import * as Result from "effect/Result"
+import * as Schema from "effect/Schema"
+import { ErrorObject, RequestId } from "../AcpSchema.ts"
 
 export type Incoming =
-  | { readonly _tag: "Request"; readonly id: RequestId; readonly method: string; readonly params: unknown }
-  | { readonly _tag: "Notification"; readonly method: string; readonly params: unknown }
+  | { readonly _tag: "Request"; readonly id: RequestId; readonly method: string; readonly params: typeof Params.Type | undefined }
+  | { readonly _tag: "Notification"; readonly method: string; readonly params: typeof Params.Type | undefined }
   | { readonly _tag: "Response"; readonly id: RequestId; readonly result: unknown }
   | { readonly _tag: "ErrorResponse"; readonly id: RequestId; readonly error: ErrorObject }
   /** Response-shaped but malformed; never answered. */
@@ -15,37 +17,58 @@ export type Incoming =
   /** Answered with an Invalid Request error whose id is null. */
   | { readonly _tag: "Invalid"; readonly reason: string }
 
-export type Outgoing = Record<string, unknown>
+export type Outgoing =
+  | { readonly jsonrpc: "2.0"; readonly method: string; readonly id?: RequestId; readonly params?: unknown }
+  | { readonly jsonrpc: "2.0"; readonly id: RequestId; readonly result: unknown }
+  | { readonly jsonrpc: "2.0"; readonly id: RequestId; readonly error: ErrorObject }
 
-const isObject = (u: unknown): u is Record<string, unknown> => typeof u === "object" && u !== null && !Array.isArray(u)
-
-export const isRequestId = (u: unknown): u is RequestId =>
-  typeof u === "string" || u === null || (typeof u === "number" && Number.isInteger(u))
-
-// ACP permits `params: null` for methods without parameters.
-const isParams = (u: unknown) => u === null || typeof u === "object"
+const ObjectEnvelope = Schema.Record(Schema.String, Schema.Unknown)
+// ACP permits null for methods without parameters, as well as structured params.
+const Params = Schema.Union([Schema.Null, ObjectEnvelope, Schema.Array(Schema.Unknown)])
+const notificationFields = {
+  jsonrpc: Schema.Literal("2.0"),
+  method: Schema.String,
+  params: Schema.optionalKey(Params)
+}
+const Request = Schema.Struct({ ...notificationFields, id: RequestId })
+const Notification = Schema.Struct(notificationFields)
+const Response = Schema.Struct({ jsonrpc: Schema.Literal("2.0"), id: RequestId, result: Schema.Unknown })
+const ErrorResponse = Schema.Struct({ jsonrpc: Schema.Literal("2.0"), id: RequestId, error: ErrorObject })
+const isObject = Schema.is(ObjectEnvelope)
+export const isRequestId = Schema.is(RequestId)
+const decodeRequest = Schema.decodeUnknownResult(Request)
+const decodeNotification = Schema.decodeUnknownResult(Notification)
+const decodeResponse = Schema.decodeUnknownResult(Response)
+const decodeErrorResponse = Schema.decodeUnknownResult(ErrorResponse)
 
 export const classify = (u: unknown): Incoming => {
   if (!isObject(u)) return { _tag: "Invalid", reason: "Message is not an object" }
   const hasId = "id" in u
   if ("method" in u) {
-    if (u.jsonrpc !== "2.0") return { _tag: "Invalid", reason: "jsonrpc must be \"2.0\"" }
-    if (typeof u.method !== "string") return { _tag: "Invalid", reason: "method must be a string" }
-    if ("params" in u && !isParams(u.params)) return { _tag: "Invalid", reason: "params must be structured" }
-    if (!hasId) return { _tag: "Notification", method: u.method, params: u.params }
-    if (!isRequestId(u.id)) return { _tag: "Invalid", reason: "Invalid request id" }
-    return { _tag: "Request", id: u.id, method: u.method, params: u.params }
+    if (hasId) {
+      const decoded = decodeRequest(u)
+      return Result.isFailure(decoded)
+        ? { _tag: "Invalid", reason: decoded.failure.message }
+        : { _tag: "Request", id: decoded.success.id, method: decoded.success.method, params: decoded.success.params }
+    }
+    const decoded = decodeNotification(u)
+    return Result.isFailure(decoded)
+      ? { _tag: "Invalid", reason: decoded.failure.message }
+      : { _tag: "Notification", method: decoded.success.method, params: decoded.success.params }
   }
   if ("result" in u || "error" in u) {
     if (!hasId || !isRequestId(u.id)) return { _tag: "InvalidResponse", id: undefined, reason: "Invalid response id" }
-    if (u.jsonrpc !== "2.0") return { _tag: "InvalidResponse", id: u.id, reason: "jsonrpc must be \"2.0\"" }
     if ("result" in u && "error" in u) return { _tag: "InvalidResponse", id: u.id, reason: "Both result and error" }
-    if ("result" in u) return { _tag: "Response", id: u.id, result: u.result }
-    const error = u.error
-    if (!isObject(error) || !Number.isInteger(error.code) || typeof error.message !== "string") {
-      return { _tag: "InvalidResponse", id: u.id, reason: "Malformed error object" }
+    if ("result" in u) {
+      const decoded = decodeResponse(u)
+      return Result.isFailure(decoded)
+        ? { _tag: "InvalidResponse", id: u.id, reason: decoded.failure.message }
+        : { _tag: "Response", id: decoded.success.id, result: decoded.success.result }
     }
-    return { _tag: "ErrorResponse", id: u.id, error: error as unknown as ErrorObject }
+    const decoded = decodeErrorResponse(u)
+    return Result.isFailure(decoded)
+      ? { _tag: "InvalidResponse", id: u.id, reason: decoded.failure.message }
+      : { _tag: "ErrorResponse", id: decoded.success.id, error: decoded.success.error }
   }
   return { _tag: "Invalid", reason: "Not a request, notification, or response" }
 }

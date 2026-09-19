@@ -1,3 +1,7 @@
+import * as Layer from "effect/Layer"
+import { AcpTransport } from "../src/AcpTransport.ts"
+import { field } from "./support/field.ts"
+import * as Json from "../src/internal/json.ts"
 import { describe, expect, test } from "bun:test"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
@@ -21,15 +25,15 @@ const v1Response = {
 const v2Response = { protocolVersion: 2, info: { name: "agent", version: "1" }, capabilities: { session: {} } }
 
 /** Runs `connect` against a raw scripted agent that answers initialize with `answer`. */
-const negotiate = (options: AcpProtocol.ConnectOptions, answer: (request: any) => unknown) =>
+const negotiate = (options: AcpProtocol.ConnectOptions, answer: (request: unknown) => unknown) =>
   Effect.gen(function*() {
     const { left, right } = yield* InMemory.make()
     const agent = yield* Effect.flatMap(right, driver)
     const connecting = yield* Effect.forkChild(
-      AcpProtocol.connect(options).pipe(Effect.provide(AcpConnector.layer(left)))
+      AcpProtocol.connect(options).pipe(Effect.provide(AcpConnector.layer(Layer.effect(AcpTransport, left))))
     )
     const request = yield* agent.next
-    yield* agent.send({ jsonrpc: "2.0", id: request.id, result: answer(request) })
+    yield* agent.send({ jsonrpc: "2.0", id: field(request, "id"), result: answer(request) })
     const exit = yield* Fiber.await(connecting)
     return { exit, request, agent }
   })
@@ -46,7 +50,7 @@ describe("version negotiation", () => {
   test("opt-in v2 negotiates v2 and advertises nothing beyond the supplied baseline params", () =>
     run(Effect.gen(function*() {
       const { exit, request } = yield* negotiate({ versions: [2, 1], params: v2Params }, () => v2Response)
-      expect(request.params).toEqual({ protocolVersion: 2, info, capabilities: {} })
+      expect(field(request, "params")).toEqual({ protocolVersion: 2, info, capabilities: {} })
       if (exit._tag !== "Success") throw new Error("expected success")
       const { negotiated } = exit.value
       expect(negotiated.version).toBe(2)
@@ -69,10 +73,10 @@ describe("version negotiation", () => {
     run(Effect.gen(function*() {
       const invalidV1 = yield* negotiate({ versions: [2, 1], params: v2Params }, () => ({ ...v1Response, authMethods: "x" }))
       expect(invalidV1.exit._tag).toBe("Failure")
-      expect(JSON.stringify(invalidV1.exit)).toContain("AcpProtocolError")
+      expect((yield* Json.encode(invalidV1.exit))).toContain("AcpProtocolError")
       yield* invalidV1.agent.closed
       const v2WithoutInfo = yield* negotiate({ versions: [2], params: v2Params }, () => ({ protocolVersion: 2 }))
-      expect(JSON.stringify(v2WithoutInfo.exit)).toContain("Invalid v2 initialize response")
+      expect((yield* Json.encode(v2WithoutInfo.exit))).toContain("Invalid v2 initialize response")
       yield* v2WithoutInfo.agent.closed
     })))
 
@@ -85,9 +89,9 @@ describe("version negotiation", () => {
           [{ versions: [2], params: v2Params }, v1Response]
         ] as const
       ) {
-        const { exit, agent } = yield* negotiate(options as AcpProtocol.ConnectOptions, () => answer)
+        const { exit, agent } = yield* negotiate(options, () => answer)
         expect(exit._tag).toBe("Failure")
-        expect(JSON.stringify(exit)).toContain("AcpUnsupportedVersion")
+        expect((yield* Json.encode(exit))).toContain("AcpUnsupportedVersion")
         yield* agent.closed
         expect(agent.received).toHaveLength(1)
       }
@@ -97,10 +101,10 @@ describe("version negotiation", () => {
     run(Effect.gen(function*() {
       const [client, agentEnd] = yield* InMemory.makePair()
       const agent = yield* driver(agentEnd)
-      const connection = yield* AcpConnection.make(client, { handlers: {} })
+      const connection = yield* AcpConnection.make({ handlers: {} }).pipe(Effect.provideService(AcpTransport, client))
       const first = yield* Effect.forkChild(AcpProtocol.initialize(connection, { params: v1Params }))
       const request = yield* agent.next
-      yield* agent.send({ jsonrpc: "2.0", id: request.id, result: v1Response })
+      yield* agent.send({ jsonrpc: "2.0", id: field(request, "id"), result: v1Response })
       yield* Fiber.join(first)
       const again = yield* Effect.flip(AcpProtocol.initialize(connection, { params: v1Params }))
       expect(again).toMatchObject({ _tag: "AcpProtocolError" })

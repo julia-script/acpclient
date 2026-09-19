@@ -1,7 +1,6 @@
 /**
  * Typed failures for ACP transports and connections.
  *
- * @since 0.1.0
  */
 import * as Schema from "effect/Schema"
 

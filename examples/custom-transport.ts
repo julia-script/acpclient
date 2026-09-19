@@ -9,7 +9,7 @@ import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Queue from "effect/Queue"
 import * as Stream from "effect/Stream"
-import { AcpConnector, AcpError, AcpProtocol, type AcpTransport } from "effect-acp"
+import { AcpConnector, AcpError, AcpProtocol, AcpTransport } from "effect-acp"
 import { createAgent } from "../test/fixtures/agent.ts"
 
 /** Adapts a MessagePort. The port is closed when the connection's scope closes. */
@@ -27,7 +27,7 @@ const fromMessagePort = (port: MessagePort) =>
       }
     }
     yield* Effect.addFinalizer(() => Effect.sync(() => port.close()))
-    const transport: AcpTransport.AcpTransport = {
+    const transport: AcpTransport.Transport = {
       incoming: Stream.fromQueue(inbox),
       send: (frame) =>
         Effect.try({
@@ -51,6 +51,6 @@ const program = Effect.gen(function*() {
   yield* Effect.log(`connected over MessagePort using ACP v${negotiated.version}`)
 })
 
-Effect.runPromise(
-  Effect.scoped(program).pipe(Effect.provide(AcpConnector.layer(fromMessagePort(channel.port1))))
+await Effect.runPromise(
+  Effect.scoped(program).pipe(Effect.provide(AcpConnector.layer(AcpTransport.layer(fromMessagePort(channel.port1)))))
 ).finally(() => channel.port2.close())

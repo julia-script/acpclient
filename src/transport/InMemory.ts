@@ -1,7 +1,7 @@
+import * as Layer from "effect/Layer"
 /**
  * Paired in-memory transports for tests and in-process composition.
  *
- * @since 0.1.0
  */
 import type * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
@@ -9,7 +9,7 @@ import * as Queue from "effect/Queue"
 import type * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import { AcpTransportError } from "../AcpError.ts"
-import type { AcpTransport } from "../AcpTransport.ts"
+import { AcpTransport, type Transport } from "../AcpTransport.ts"
 
 export interface Options {
   /** Frames buffered per direction before `send` suspends. Default 64. */
@@ -24,8 +24,8 @@ const closed = new AcpTransportError({ reason: "Closed", message: "In-memory tra
  * writes in both directions, including writers blocked on backpressure.
  */
 export const make = (options?: Options): Effect.Effect<{
-  readonly left: Effect.Effect<AcpTransport, never, Scope.Scope>
-  readonly right: Effect.Effect<AcpTransport, never, Scope.Scope>
+  readonly left: Effect.Effect<Transport, never, Scope.Scope>
+  readonly right: Effect.Effect<Transport, never, Scope.Scope>
 }> =>
   Effect.gen(function*() {
     const capacity = options?.capacity ?? 64
@@ -33,7 +33,7 @@ export const make = (options?: Options): Effect.Effect<{
     const rightToLeft = yield* Queue.bounded<string, Cause.Done>(capacity)
     const end = (outgoing: Queue.Queue<string, Cause.Done>, incoming: Queue.Queue<string, Cause.Done>) =>
       Effect.acquireRelease(
-        Effect.succeed<AcpTransport>({
+        Effect.succeed<Transport>({
           incoming: Stream.fromQueue(incoming),
           send: (frame) =>
             Effect.flatMap(Queue.offer(outgoing, frame), (accepted) => accepted ? Effect.void : Effect.fail(closed))
@@ -44,5 +44,9 @@ export const make = (options?: Options): Effect.Effect<{
   })
 
 /** Both ends of a pair owned by the current scope. */
-export const makePair = (options?: Options): Effect.Effect<readonly [AcpTransport, AcpTransport], never, Scope.Scope> =>
+export const makePair = (options?: Options): Effect.Effect<readonly [Transport, Transport], never, Scope.Scope> =>
   Effect.flatMap(make(options), ({ left, right }) => Effect.all([left, right]))
+
+/** Acquires one endpoint from a pair as the same service used by live adapters. */
+export const layer = (endpoint: Effect.Effect<Transport, never, Scope.Scope>): Layer.Layer<AcpTransport> =>
+  Layer.effect(AcpTransport, endpoint)

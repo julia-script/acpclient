@@ -1,3 +1,8 @@
+import * as NodeRuntime from "@effect/platform-node/NodeRuntime"
+import * as Option from "effect/Option"
+import * as Argument from "effect/unstable/cli/Argument"
+import * as Command from "effect/unstable/cli/Command"
+import * as AcpConnector from "effect-acp/AcpConnector"
 /**
  * Spawn an ACP agent over stdio, prefer v2 while accepting v1, and prompt it.
  *
@@ -11,15 +16,11 @@ import * as Layer from "effect/Layer"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { AcpConnection, AcpProtocol, Stdio, V1, V2 } from "effect-acp"
 
-const [command = "bun", ...args] = process.argv.length > 2
-  ? process.argv.slice(2)
-  : ["bun", new URL("../test/fixtures/agent.ts", import.meta.url).pathname, "2"]
-
 // The process runtime is supplied here, by the application.
-const Agent = Stdio.layer(ChildProcess.make(command, args), {
+const agentLayer = (command: ChildProcess.Command) => AcpConnector.layer(Stdio.layer(command, {
   maxFrameBytes: 8 * 1024 * 1024,
   stderr: { maxBytes: 16 * 1024 }
-}).pipe(Layer.provide(NodeServices.layer))
+})).pipe(Layer.provide(NodeServices.layer))
 
 // Answer permission requests in whichever version was negotiated.
 const allow = { outcome: { outcome: "selected" as const, optionId: "allow" } }
@@ -57,4 +58,19 @@ const program = Effect.gen(function*() {
 })
 
 // Closing the scope settles pending requests and terminates the agent.
-Effect.runPromise(Effect.scoped(program).pipe(Effect.provide(Agent)))
+export const cli = Command.make("stdio-client", {
+  bin: Argument.String("bin").pipe(Argument.optional),
+  args: Argument.String("agent-args").pipe(
+    Argument.variadic(),
+    Argument.withDescription("Agent-specific arguments; put flags after --")
+  )
+}, ({ bin, args }) => {
+  const command = Option.isSome(bin)
+    ? ChildProcess.make(bin.value, args)
+    : ChildProcess.make("bun", [new URL("../test/fixtures/agent.ts", import.meta.url).pathname, "2"])
+  return Effect.scoped(program).pipe(Effect.provide(agentLayer(command)))
+})
+
+if (import.meta.main) {
+  NodeRuntime.runMain(Command.run(cli, { version: "1.0.0" }).pipe(Effect.provide(NodeServices.layer)))
+}

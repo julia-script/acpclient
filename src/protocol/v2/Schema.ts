@@ -6,7 +6,7 @@
  */
 import * as Schema from "effect/Schema"
 import * as AcpSchema from "../../AcpSchema.ts"
-import * as W from "../../internal/wire.ts"
+import * as Wire from "../../internal/wire.ts"
 
 /** Protocol version described by this module. */
 export const version = 2 as const
@@ -26,7 +26,7 @@ export const provenance = {
  * An absolute filesystem path used by the protocol.
  */
 export type AbsolutePath = string
-export const AbsolutePath = W.def<AbsolutePath>("AbsolutePath", Schema.String)
+export const AbsolutePath = Wire.def<AbsolutePath>("AbsolutePath", Schema.String)
 
 /**
  * Authentication-related extension capabilities supported by the agent.
@@ -45,8 +45,8 @@ export type AgentAuthCapabilities = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const AgentAuthCapabilities = W.def<AgentAuthCapabilities>("AgentAuthCapabilities", W.object({
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+export const AgentAuthCapabilities = Wire.def<AgentAuthCapabilities>("AgentAuthCapabilities", Wire.object({
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -64,8 +64,8 @@ export type McpHttpCapabilities = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const McpHttpCapabilities = W.def<McpHttpCapabilities>("McpHttpCapabilities", W.object({
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+export const McpHttpCapabilities = Wire.def<McpHttpCapabilities>("McpHttpCapabilities", Wire.object({
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -83,8 +83,8 @@ export type McpStdioCapabilities = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const McpStdioCapabilities = W.def<McpStdioCapabilities>("McpStdioCapabilities", W.object({
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+export const McpStdioCapabilities = Wire.def<McpStdioCapabilities>("McpStdioCapabilities", Wire.object({
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -114,7 +114,7 @@ export type McpCapabilities = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const McpCapabilities = W.def<McpCapabilities>("McpCapabilities", W.object({
+export const McpCapabilities = Wire.def<McpCapabilities>("McpCapabilities", Wire.object({
   stdio: Schema.optionalKey(Schema.Union([
     McpStdioCapabilities,
     Schema.Null
@@ -123,7 +123,7 @@ export const McpCapabilities = W.def<McpCapabilities>("McpCapabilities", W.objec
     McpHttpCapabilities,
     Schema.Null
   ])),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -141,8 +141,8 @@ export type PromptAudioCapabilities = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const PromptAudioCapabilities = W.def<PromptAudioCapabilities>("PromptAudioCapabilities", W.object({
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+export const PromptAudioCapabilities = Wire.def<PromptAudioCapabilities>("PromptAudioCapabilities", Wire.object({
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -160,8 +160,8 @@ export type PromptEmbeddedContextCapabilities = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const PromptEmbeddedContextCapabilities = W.def<PromptEmbeddedContextCapabilities>("PromptEmbeddedContextCapabilities", W.object({
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+export const PromptEmbeddedContextCapabilities = Wire.def<PromptEmbeddedContextCapabilities>("PromptEmbeddedContextCapabilities", Wire.object({
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -179,8 +179,8 @@ export type PromptImageCapabilities = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const PromptImageCapabilities = W.def<PromptImageCapabilities>("PromptImageCapabilities", W.object({
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+export const PromptImageCapabilities = Wire.def<PromptImageCapabilities>("PromptImageCapabilities", Wire.object({
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -231,7 +231,7 @@ export type PromptCapabilities = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const PromptCapabilities = W.def<PromptCapabilities>("PromptCapabilities", W.object({
+export const PromptCapabilities = Wire.def<PromptCapabilities>("PromptCapabilities", Wire.object({
   image: Schema.optionalKey(Schema.Union([
     PromptImageCapabilities,
     Schema.Null
@@ -244,7 +244,7 @@ export const PromptCapabilities = W.def<PromptCapabilities>("PromptCapabilities"
     PromptEmbeddedContextCapabilities,
     Schema.Null
   ])),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -265,8 +265,8 @@ export type SessionAdditionalDirectoriesCapabilities = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const SessionAdditionalDirectoriesCapabilities = W.def<SessionAdditionalDirectoriesCapabilities>("SessionAdditionalDirectoriesCapabilities", W.object({
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+export const SessionAdditionalDirectoriesCapabilities = Wire.def<SessionAdditionalDirectoriesCapabilities>("SessionAdditionalDirectoriesCapabilities", Wire.object({
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -284,8 +284,8 @@ export type SessionDeleteCapabilities = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const SessionDeleteCapabilities = W.def<SessionDeleteCapabilities>("SessionDeleteCapabilities", W.object({
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+export const SessionDeleteCapabilities = Wire.def<SessionDeleteCapabilities>("SessionDeleteCapabilities", Wire.object({
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -344,7 +344,7 @@ export type SessionCapabilities = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const SessionCapabilities = W.def<SessionCapabilities>("SessionCapabilities", W.object({
+export const SessionCapabilities = Wire.def<SessionCapabilities>("SessionCapabilities", Wire.object({
   prompt: Schema.optionalKey(Schema.Union([
     PromptCapabilities,
     Schema.Null
@@ -361,7 +361,7 @@ export const SessionCapabilities = W.def<SessionCapabilities>("SessionCapabiliti
     SessionAdditionalDirectoriesCapabilities,
     Schema.Null
   ])),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -400,7 +400,7 @@ export type AgentCapabilities = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const AgentCapabilities = W.def<AgentCapabilities>("AgentCapabilities", W.object({
+export const AgentCapabilities = Wire.def<AgentCapabilities>("AgentCapabilities", Wire.object({
   session: Schema.optionalKey(Schema.Union([
     SessionCapabilities,
     Schema.Null
@@ -409,14 +409,14 @@ export const AgentCapabilities = W.def<AgentCapabilities>("AgentCapabilities", W
     AgentAuthCapabilities,
     Schema.Null
   ])),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
  * The sender or recipient of messages and data in a conversation.
  */
-export type Role = ("assistant") | ("user") | (string)
-export const Role = W.def<Role>("Role", Schema.Union([
+export type Role = (string)
+export const Role = Wire.def<Role>("Role", Schema.Union([
   Schema.Literal("assistant"),
   Schema.Literal("user"),
   Schema.String
@@ -449,18 +449,18 @@ export type Annotations = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const Annotations = W.def<Annotations>("Annotations", W.object({
+export const Annotations = Wire.def<Annotations>("Annotations", Wire.object({
   audience: Schema.optionalKey(Schema.Union([Schema.Array(Role), Schema.Null])),
   lastModified: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
   priority: Schema.optionalKey(Schema.Union([Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0), Schema.isLessThanOrEqualTo(1)), Schema.Null])),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
  * An Internet media type identifying the format of protocol content.
  */
 export type MediaType = string
-export const MediaType = W.def<MediaType>("MediaType", Schema.String)
+export const MediaType = Wire.def<MediaType>("MediaType", Schema.String)
 
 /**
  * Audio provided to or from an LLM.
@@ -487,14 +487,14 @@ export type AudioContent = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const AudioContent = W.def<AudioContent>("AudioContent", W.object({
+export const AudioContent = Wire.def<AudioContent>("AudioContent", Wire.object({
   data: Schema.String,
   mimeType: MediaType,
   annotations: Schema.optionalKey(Schema.Union([
     Annotations,
     Schema.Null
   ])),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -522,14 +522,14 @@ export type BlobResourceContents = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const BlobResourceContents = W.def<BlobResourceContents>("BlobResourceContents", W.object({
+export const BlobResourceContents = Wire.def<BlobResourceContents>("BlobResourceContents", Wire.object({
   blob: Schema.String,
   uri: Schema.String,
   mimeType: Schema.optionalKey(Schema.Union([
     MediaType,
     Schema.Null
   ])),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -557,21 +557,21 @@ export type TextResourceContents = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const TextResourceContents = W.def<TextResourceContents>("TextResourceContents", W.object({
+export const TextResourceContents = Wire.def<TextResourceContents>("TextResourceContents", Wire.object({
   text: Schema.String,
   uri: Schema.String,
   mimeType: Schema.optionalKey(Schema.Union([
     MediaType,
     Schema.Null
   ])),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
  * Resource content that can be embedded in a message.
  */
 export type EmbeddedResourceResource = (TextResourceContents) | (BlobResourceContents)
-export const EmbeddedResourceResource = W.def<EmbeddedResourceResource>("EmbeddedResourceResource", Schema.Union([
+export const EmbeddedResourceResource = Wire.def<EmbeddedResourceResource>("EmbeddedResourceResource", Schema.Union([
   TextResourceContents,
   BlobResourceContents
 ]))
@@ -597,13 +597,13 @@ export type EmbeddedResource = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const EmbeddedResource = W.def<EmbeddedResource>("EmbeddedResource", W.object({
+export const EmbeddedResource = Wire.def<EmbeddedResource>("EmbeddedResource", Wire.object({
   resource: EmbeddedResourceResource,
   annotations: Schema.optionalKey(Schema.Union([
     Annotations,
     Schema.Null
   ])),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -635,7 +635,7 @@ export type ImageContent = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const ImageContent = W.def<ImageContent>("ImageContent", W.object({
+export const ImageContent = Wire.def<ImageContent>("ImageContent", Wire.object({
   data: Schema.String,
   mimeType: MediaType,
   uri: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
@@ -643,14 +643,14 @@ export const ImageContent = W.def<ImageContent>("ImageContent", W.object({
     Annotations,
     Schema.Null
   ])),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
  * Theme an icon is designed for.
  */
-export type IconTheme = ("light") | ("dark") | (string)
-export const IconTheme = W.def<IconTheme>("IconTheme", Schema.Union([
+export type IconTheme = (string)
+export const IconTheme = Wire.def<IconTheme>("IconTheme", Schema.Union([
   Schema.Literal("light"),
   Schema.Literal("dark"),
   Schema.String
@@ -681,7 +681,7 @@ export type Icon = {
    */
   readonly theme?: (IconTheme) | (null)
 }
-export const Icon = W.def<Icon>("Icon", W.object({
+export const Icon = Wire.def<Icon>("Icon", Wire.object({
   src: Schema.String,
   mimeType: Schema.optionalKey(Schema.Union([
     MediaType,
@@ -739,7 +739,7 @@ export type ResourceLink = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const ResourceLink = W.def<ResourceLink>("ResourceLink", W.object({
+export const ResourceLink = Wire.def<ResourceLink>("ResourceLink", Wire.object({
   name: Schema.String,
   uri: Schema.String,
   title: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
@@ -749,12 +749,12 @@ export const ResourceLink = W.def<ResourceLink>("ResourceLink", W.object({
     MediaType,
     Schema.Null
   ])),
-  size: Schema.optionalKey(Schema.Union([W.integer, Schema.Null])),
+  size: Schema.optionalKey(Schema.Union([Wire.integer, Schema.Null])),
   annotations: Schema.optionalKey(Schema.Union([
     Annotations,
     Schema.Null
   ])),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -778,13 +778,13 @@ export type TextContent = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const TextContent = W.def<TextContent>("TextContent", W.object({
+export const TextContent = Wire.def<TextContent>("TextContent", Wire.object({
   text: Schema.String,
   annotations: Schema.optionalKey(Schema.Union([
     Annotations,
     Schema.Null
   ])),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -824,55 +824,55 @@ export type ContentBlock = (({
    */
   readonly type: string
 })
-export const ContentBlock = W.def<ContentBlock>("ContentBlock", Schema.Union([
-  W.allOf(
-    W.object({
+export const ContentBlock = Wire.def<ContentBlock>("ContentBlock", Schema.Union([
+  Wire.allOf(
+    Wire.object({
       type: Schema.Literal("text")
     }),
     TextContent
   ),
-  W.allOf(
-    W.object({
+  Wire.allOf(
+    Wire.object({
       type: Schema.Literal("image")
     }),
     ImageContent
   ),
-  W.allOf(
-    W.object({
+  Wire.allOf(
+    Wire.object({
       type: Schema.Literal("audio")
     }),
     AudioContent
   ),
-  W.allOf(
-    W.object({
+  Wire.allOf(
+    Wire.object({
       type: Schema.Literal("resource_link")
     }),
     ResourceLink
   ),
-  W.allOf(
-    W.object({
+  Wire.allOf(
+    Wire.object({
       type: Schema.Literal("resource")
     }),
     EmbeddedResource
   ),
-  W.not(
-    W.object({
+  Wire.not(
+    Wire.object({
       type: Schema.String
     }),
     Schema.Union([
-      W.object({
+      Wire.object({
         type: Schema.Literal("text")
       }),
-      W.object({
+      Wire.object({
         type: Schema.Literal("image")
       }),
-      W.object({
+      Wire.object({
         type: Schema.Literal("audio")
       }),
-      W.object({
+      Wire.object({
         type: Schema.Literal("resource_link")
       }),
-      W.object({
+      Wire.object({
         type: Schema.Literal("resource")
       })
     ])
@@ -883,7 +883,7 @@ export const ContentBlock = W.def<ContentBlock>("ContentBlock", Schema.Union([
  * Unique identifier for a message within a session.
  */
 export type MessageId = string
-export const MessageId = W.def<MessageId>("MessageId", Schema.String)
+export const MessageId = Wire.def<MessageId>("MessageId", Schema.String)
 
 /**
  * An agent message upsert.
@@ -918,17 +918,17 @@ export type AgentMessage = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const AgentMessage = W.def<AgentMessage>("AgentMessage", W.object({
+export const AgentMessage = Wire.def<AgentMessage>("AgentMessage", Wire.object({
   messageId: MessageId,
   content: Schema.optionalKey(Schema.Union([Schema.Array(ContentBlock), Schema.Null])),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
  * Unique identifier for an elicitation.
  */
 export type ElicitationId = string
-export const ElicitationId = W.def<ElicitationId>("ElicitationId", Schema.String)
+export const ElicitationId = Wire.def<ElicitationId>("ElicitationId", Schema.String)
 
 /**
  * Notification sent by the agent when a URL-based elicitation is complete.
@@ -949,9 +949,9 @@ export type CompleteElicitationNotification = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const CompleteElicitationNotification = W.def<CompleteElicitationNotification>("CompleteElicitationNotification", W.object({
+export const CompleteElicitationNotification = Wire.def<CompleteElicitationNotification>("CompleteElicitationNotification", Wire.object({
   elicitationId: ElicitationId,
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -962,7 +962,7 @@ export const CompleteElicitationNotification = W.def<CompleteElicitationNotifica
  * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
  */
 export type ExtNotification = unknown
-export const ExtNotification = W.def<ExtNotification>("ExtNotification", Schema.Unknown)
+export const ExtNotification = Wire.def<ExtNotification>("ExtNotification", Schema.Unknown)
 
 /**
  * A unique identifier for a conversation session between a client and agent.
@@ -973,7 +973,7 @@ export const ExtNotification = W.def<ExtNotification>("ExtNotification", Schema.
  * See protocol docs: [Session ID](https://agentclientprotocol.com/protocol/v2/session-setup#session-id)
  */
 export type SessionId = string
-export const SessionId = W.def<SessionId>("SessionId", Schema.String)
+export const SessionId = Wire.def<SessionId>("SessionId", Schema.String)
 
 /**
  * An agent thought or reasoning message upsert.
@@ -1008,10 +1008,10 @@ export type AgentThought = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const AgentThought = W.def<AgentThought>("AgentThought", W.object({
+export const AgentThought = Wire.def<AgentThought>("AgentThought", Wire.object({
   messageId: MessageId,
   content: Schema.optionalKey(Schema.Union([Schema.Array(ContentBlock), Schema.Null])),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -1031,9 +1031,9 @@ export type TextCommandInput = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const TextCommandInput = W.def<TextCommandInput>("TextCommandInput", W.object({
+export const TextCommandInput = Wire.def<TextCommandInput>("TextCommandInput", Wire.object({
   hint: Schema.String,
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -1051,18 +1051,18 @@ export type AvailableCommandInput = (({
    */
   readonly type: string
 })
-export const AvailableCommandInput = W.def<AvailableCommandInput>("AvailableCommandInput", Schema.Union([
-  W.allOf(
-    W.object({
+export const AvailableCommandInput = Wire.def<AvailableCommandInput>("AvailableCommandInput", Schema.Union([
+  Wire.allOf(
+    Wire.object({
       type: Schema.Literal("text")
     }),
     TextCommandInput
   ),
-  W.not(
-    W.object({
+  Wire.not(
+    Wire.object({
       type: Schema.String
     }),
-    W.object({
+    Wire.object({
       type: Schema.Literal("text")
     })
   )
@@ -1093,14 +1093,14 @@ export type AvailableCommand = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const AvailableCommand = W.def<AvailableCommand>("AvailableCommand", W.object({
+export const AvailableCommand = Wire.def<AvailableCommand>("AvailableCommand", Wire.object({
   name: Schema.String,
   description: Schema.String,
   input: Schema.optionalKey(Schema.Union([
     AvailableCommandInput,
     Schema.Null
   ])),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -1120,9 +1120,9 @@ export type AvailableCommandsUpdate = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const AvailableCommandsUpdate = W.def<AvailableCommandsUpdate>("AvailableCommandsUpdate", W.object({
+export const AvailableCommandsUpdate = Wire.def<AvailableCommandsUpdate>("AvailableCommandsUpdate", Wire.object({
   availableCommands: Schema.Array(AvailableCommand),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -1134,7 +1134,7 @@ export type SessionConfigBoolean = {
    */
   readonly currentValue: boolean
 }
-export const SessionConfigBoolean = W.def<SessionConfigBoolean>("SessionConfigBoolean", W.object({
+export const SessionConfigBoolean = Wire.def<SessionConfigBoolean>("SessionConfigBoolean", Wire.object({
   currentValue: Schema.Boolean
 }))
 
@@ -1142,7 +1142,7 @@ export const SessionConfigBoolean = W.def<SessionConfigBoolean>("SessionConfigBo
  * Unique identifier for a session configuration option.
  */
 export type SessionConfigId = string
-export const SessionConfigId = W.def<SessionConfigId>("SessionConfigId", Schema.String)
+export const SessionConfigId = Wire.def<SessionConfigId>("SessionConfigId", Schema.String)
 
 /**
  * Semantic category for a session configuration option.
@@ -1155,8 +1155,8 @@ export const SessionConfigId = W.def<SessionConfigId>("SessionConfigId", Schema.
  * Category names beginning with `_` are free for custom use, like other ACP extension methods.
  * Category names that do not begin with `_` are reserved for the ACP spec.
  */
-export type SessionConfigOptionCategory = ("mode") | ("model") | ("model_config") | ("thought_level") | (string)
-export const SessionConfigOptionCategory = W.def<SessionConfigOptionCategory>("SessionConfigOptionCategory", Schema.Union([
+export type SessionConfigOptionCategory = (string)
+export const SessionConfigOptionCategory = Wire.def<SessionConfigOptionCategory>("SessionConfigOptionCategory", Schema.Union([
   Schema.Literal("mode"),
   Schema.Literal("model"),
   Schema.Literal("model_config"),
@@ -1168,13 +1168,13 @@ export const SessionConfigOptionCategory = W.def<SessionConfigOptionCategory>("S
  * Unique identifier for a session configuration option value group.
  */
 export type SessionConfigGroupId = string
-export const SessionConfigGroupId = W.def<SessionConfigGroupId>("SessionConfigGroupId", Schema.String)
+export const SessionConfigGroupId = Wire.def<SessionConfigGroupId>("SessionConfigGroupId", Schema.String)
 
 /**
  * Unique identifier for a session configuration option value.
  */
 export type SessionConfigValueId = string
-export const SessionConfigValueId = W.def<SessionConfigValueId>("SessionConfigValueId", Schema.String)
+export const SessionConfigValueId = Wire.def<SessionConfigValueId>("SessionConfigValueId", Schema.String)
 
 /**
  * A possible value for a session configuration option.
@@ -1201,11 +1201,11 @@ export type SessionConfigSelectOption = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const SessionConfigSelectOption = W.def<SessionConfigSelectOption>("SessionConfigSelectOption", W.object({
+export const SessionConfigSelectOption = Wire.def<SessionConfigSelectOption>("SessionConfigSelectOption", Wire.object({
   value: SessionConfigValueId,
   name: Schema.String,
   description: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -1233,18 +1233,18 @@ export type SessionConfigSelectGroup = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const SessionConfigSelectGroup = W.def<SessionConfigSelectGroup>("SessionConfigSelectGroup", W.object({
+export const SessionConfigSelectGroup = Wire.def<SessionConfigSelectGroup>("SessionConfigSelectGroup", Wire.object({
   groupId: SessionConfigGroupId,
   name: Schema.String,
   options: Schema.Array(SessionConfigSelectOption),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
  * Possible values for a session configuration option.
  */
 export type SessionConfigSelectOptions = (ReadonlyArray<SessionConfigSelectOption>) | (ReadonlyArray<SessionConfigSelectGroup>)
-export const SessionConfigSelectOptions = W.def<SessionConfigSelectOptions>("SessionConfigSelectOptions", Schema.Union([
+export const SessionConfigSelectOptions = Wire.def<SessionConfigSelectOptions>("SessionConfigSelectOptions", Schema.Union([
   Schema.Array(SessionConfigSelectOption),
   Schema.Array(SessionConfigSelectGroup)
 ]))
@@ -1262,7 +1262,7 @@ export type SessionConfigSelect = {
    */
   readonly options: SessionConfigSelectOptions
 }
-export const SessionConfigSelect = W.def<SessionConfigSelect>("SessionConfigSelect", W.object({
+export const SessionConfigSelect = Wire.def<SessionConfigSelect>("SessionConfigSelect", Wire.object({
   currentValue: SessionConfigValueId,
   options: SessionConfigSelectOptions
 }))
@@ -1309,8 +1309,8 @@ export type SessionConfigOption = ({
    */
   readonly type: string
 }))
-export const SessionConfigOption = W.def<SessionConfigOption>("SessionConfigOption", W.allOf(
-  W.object({
+export const SessionConfigOption = Wire.def<SessionConfigOption>("SessionConfigOption", Wire.allOf(
+  Wire.object({
     configId: SessionConfigId,
     name: Schema.String,
     description: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
@@ -1318,30 +1318,30 @@ export const SessionConfigOption = W.def<SessionConfigOption>("SessionConfigOpti
       SessionConfigOptionCategory,
       Schema.Null
     ])),
-    _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+    _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
   }),
   Schema.Union([
-    W.allOf(
-      W.object({
+    Wire.allOf(
+      Wire.object({
         type: Schema.Literal("select")
       }),
       SessionConfigSelect
     ),
-    W.allOf(
-      W.object({
+    Wire.allOf(
+      Wire.object({
         type: Schema.Literal("boolean")
       }),
       SessionConfigBoolean
     ),
-    W.not(
-      W.object({
+    Wire.not(
+      Wire.object({
         type: Schema.String
       }),
       Schema.Union([
-        W.object({
+        Wire.object({
           type: Schema.Literal("select")
         }),
-        W.object({
+        Wire.object({
           type: Schema.Literal("boolean")
         })
       ])
@@ -1366,9 +1366,9 @@ export type ConfigOptionUpdate = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const ConfigOptionUpdate = W.def<ConfigOptionUpdate>("ConfigOptionUpdate", W.object({
+export const ConfigOptionUpdate = Wire.def<ConfigOptionUpdate>("ConfigOptionUpdate", Wire.object({
   configOptions: Schema.Array(SessionConfigOption),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -1395,17 +1395,17 @@ export type ContentChunk = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const ContentChunk = W.def<ContentChunk>("ContentChunk", W.object({
+export const ContentChunk = Wire.def<ContentChunk>("ContentChunk", Wire.object({
   messageId: MessageId,
   content: ContentBlock,
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
  * Unique identifier for a plan within a session.
  */
 export type PlanId = string
-export const PlanId = W.def<PlanId>("PlanId", Schema.String)
+export const PlanId = Wire.def<PlanId>("PlanId", Schema.String)
 
 /**
  * Priority levels for plan entries.
@@ -1414,8 +1414,8 @@ export const PlanId = W.def<PlanId>("PlanId", Schema.String)
  * tasks in the execution plan.
  * See protocol docs: [Plan Entries](https://agentclientprotocol.com/protocol/v2/agent-plan#plan-entries)
  */
-export type PlanEntryPriority = ("high") | ("medium") | ("low") | (string)
-export const PlanEntryPriority = W.def<PlanEntryPriority>("PlanEntryPriority", Schema.Union([
+export type PlanEntryPriority = (string)
+export const PlanEntryPriority = Wire.def<PlanEntryPriority>("PlanEntryPriority", Schema.Union([
   Schema.Literal("high"),
   Schema.Literal("medium"),
   Schema.Literal("low"),
@@ -1428,8 +1428,8 @@ export const PlanEntryPriority = W.def<PlanEntryPriority>("PlanEntryPriority", S
  * Tracks the lifecycle of each task from planning through completion.
  * See protocol docs: [Plan Entries](https://agentclientprotocol.com/protocol/v2/agent-plan#plan-entries)
  */
-export type PlanEntryStatus = ("pending") | ("in_progress") | ("completed") | ("cancelled") | (string)
-export const PlanEntryStatus = W.def<PlanEntryStatus>("PlanEntryStatus", Schema.Union([
+export type PlanEntryStatus = (string)
+export const PlanEntryStatus = Wire.def<PlanEntryStatus>("PlanEntryStatus", Schema.Union([
   Schema.Literal("pending"),
   Schema.Literal("in_progress"),
   Schema.Literal("completed"),
@@ -1467,11 +1467,11 @@ export type PlanEntry = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const PlanEntry = W.def<PlanEntry>("PlanEntry", W.object({
+export const PlanEntry = Wire.def<PlanEntry>("PlanEntry", Wire.object({
   content: Schema.String,
   priority: PlanEntryPriority,
   status: PlanEntryStatus,
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -1498,10 +1498,10 @@ export type PlanItems = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const PlanItems = W.def<PlanItems>("PlanItems", W.object({
+export const PlanItems = Wire.def<PlanItems>("PlanItems", Wire.object({
   planId: PlanId,
   entries: Schema.Array(PlanEntry),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -1523,26 +1523,26 @@ export type PlanUpdateContent = (({
    */
   readonly planId: PlanId
 })
-export const PlanUpdateContent = W.def<PlanUpdateContent>("PlanUpdateContent", Schema.Union([
-  W.allOf(
-    W.object({
+export const PlanUpdateContent = Wire.def<PlanUpdateContent>("PlanUpdateContent", Schema.Union([
+  Wire.allOf(
+    Wire.object({
       type: Schema.Literal("items")
     }),
     PlanItems
   ),
-  W.not(
-    W.object({
+  Wire.not(
+    Wire.object({
       type: Schema.String,
       planId: PlanId
     }),
     Schema.Union([
-      W.object({
+      Wire.object({
         type: Schema.Literal("items")
       }),
-      W.object({
+      Wire.object({
         type: Schema.Literal("file")
       }),
-      W.object({
+      Wire.object({
         type: Schema.Literal("markdown")
       })
     ])
@@ -1566,9 +1566,9 @@ export type PlanUpdate = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const PlanUpdate = W.def<PlanUpdate>("PlanUpdate", W.object({
+export const PlanUpdate = Wire.def<PlanUpdate>("PlanUpdate", Wire.object({
   plan: PlanUpdateContent,
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -1598,10 +1598,10 @@ export type SessionInfoUpdate = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const SessionInfoUpdate = W.def<SessionInfoUpdate>("SessionInfoUpdate", W.object({
+export const SessionInfoUpdate = Wire.def<SessionInfoUpdate>("SessionInfoUpdate", Wire.object({
   title: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
   updatedAt: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -1609,8 +1609,8 @@ export const SessionInfoUpdate = W.def<SessionInfoUpdate>("SessionInfoUpdate", W
  *
  * See protocol docs: [Stop Reasons](https://agentclientprotocol.com/protocol/v2/prompt-lifecycle#stop-reasons)
  */
-export type StopReason = ("end_turn") | ("max_tokens") | ("max_turn_requests") | ("refusal") | ("cancelled") | (string)
-export const StopReason = W.def<StopReason>("StopReason", Schema.Union([
+export type StopReason = (string)
+export const StopReason = Wire.def<StopReason>("StopReason", Schema.Union([
   Schema.Literal("end_turn"),
   Schema.Literal("max_tokens"),
   Schema.Literal("max_turn_requests"),
@@ -1639,12 +1639,12 @@ export type IdleStateUpdate = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const IdleStateUpdate = W.def<IdleStateUpdate>("IdleStateUpdate", W.object({
+export const IdleStateUpdate = Wire.def<IdleStateUpdate>("IdleStateUpdate", Wire.object({
   stopReason: Schema.optionalKey(Schema.Union([
     StopReason,
     Schema.Null
   ])),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -1660,8 +1660,8 @@ export type RequiresActionStateUpdate = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const RequiresActionStateUpdate = W.def<RequiresActionStateUpdate>("RequiresActionStateUpdate", W.object({
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+export const RequiresActionStateUpdate = Wire.def<RequiresActionStateUpdate>("RequiresActionStateUpdate", Wire.object({
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -1677,8 +1677,8 @@ export type RunningStateUpdate = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const RunningStateUpdate = W.def<RunningStateUpdate>("RunningStateUpdate", W.object({
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+export const RunningStateUpdate = Wire.def<RunningStateUpdate>("RunningStateUpdate", Wire.object({
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -1703,37 +1703,37 @@ export type StateUpdate = (({
    */
   readonly state: string
 })
-export const StateUpdate = W.def<StateUpdate>("StateUpdate", Schema.Union([
-  W.allOf(
-    W.object({
+export const StateUpdate = Wire.def<StateUpdate>("StateUpdate", Schema.Union([
+  Wire.allOf(
+    Wire.object({
       state: Schema.Literal("running")
     }),
     RunningStateUpdate
   ),
-  W.allOf(
-    W.object({
+  Wire.allOf(
+    Wire.object({
       state: Schema.Literal("idle")
     }),
     IdleStateUpdate
   ),
-  W.allOf(
-    W.object({
+  Wire.allOf(
+    Wire.object({
       state: Schema.Literal("requires_action")
     }),
     RequiresActionStateUpdate
   ),
-  W.not(
-    W.object({
+  Wire.not(
+    Wire.object({
       state: Schema.String
     }),
     Schema.Union([
-      W.object({
+      Wire.object({
         state: Schema.Literal("running")
       }),
-      W.object({
+      Wire.object({
         state: Schema.Literal("idle")
       }),
-      W.object({
+      Wire.object({
         state: Schema.Literal("requires_action")
       })
     ])
@@ -1744,7 +1744,7 @@ export const StateUpdate = W.def<StateUpdate>("StateUpdate", Schema.Union([
  * Unique identifier for an agent-owned terminal within a session.
  */
 export type TerminalId = string
-export const TerminalId = W.def<TerminalId>("TerminalId", Schema.String)
+export const TerminalId = Wire.def<TerminalId>("TerminalId", Schema.String)
 
 /**
  * A chunk of bytes appended to an agent-owned terminal's output.
@@ -1768,10 +1768,10 @@ export type TerminalOutputChunk = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const TerminalOutputChunk = W.def<TerminalOutputChunk>("TerminalOutputChunk", W.object({
+export const TerminalOutputChunk = Wire.def<TerminalOutputChunk>("TerminalOutputChunk", Wire.object({
   terminalId: TerminalId,
   data: Schema.String,
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -1803,10 +1803,10 @@ export type TerminalExitStatus = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const TerminalExitStatus = W.def<TerminalExitStatus>("TerminalExitStatus", W.object({
-  exitCode: Schema.optionalKey(Schema.Union([W.integer.check(Schema.isGreaterThanOrEqualTo(0)), Schema.Null])),
+export const TerminalExitStatus = Wire.def<TerminalExitStatus>("TerminalExitStatus", Wire.object({
+  exitCode: Schema.optionalKey(Schema.Union([Wire.integer.check(Schema.isGreaterThanOrEqualTo(0)), Schema.Null])),
   signal: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -1827,9 +1827,9 @@ export type TerminalOutput = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const TerminalOutput = W.def<TerminalOutput>("TerminalOutput", W.object({
+export const TerminalOutput = Wire.def<TerminalOutput>("TerminalOutput", Wire.object({
   data: Schema.String,
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -1870,7 +1870,7 @@ export type TerminalUpdate = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const TerminalUpdate = W.def<TerminalUpdate>("TerminalUpdate", W.object({
+export const TerminalUpdate = Wire.def<TerminalUpdate>("TerminalUpdate", Wire.object({
   terminalId: TerminalId,
   command: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
   cwd: Schema.optionalKey(Schema.Union([
@@ -1885,7 +1885,7 @@ export const TerminalUpdate = W.def<TerminalUpdate>("TerminalUpdate", W.object({
     TerminalExitStatus,
     Schema.Null
   ])),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -1905,16 +1905,16 @@ export type Content = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const Content = W.def<Content>("Content", W.object({
+export const Content = Wire.def<Content>("Content", Wire.object({
   content: ContentBlock,
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
  * Kind of file content represented by a diff change.
  */
-export type DiffFileType = ("text") | ("binary") | ("directory") | ("symlink") | (string)
-export const DiffFileType = W.def<DiffFileType>("DiffFileType", Schema.Union([
+export type DiffFileType = (string)
+export const DiffFileType = Wire.def<DiffFileType>("DiffFileType", Schema.Union([
   Schema.Literal("text"),
   Schema.Literal("binary"),
   Schema.Literal("directory"),
@@ -1931,7 +1931,7 @@ export type DiffPathChange = {
    */
   readonly path: AbsolutePath
 }
-export const DiffPathChange = W.def<DiffPathChange>("DiffPathChange", W.object({
+export const DiffPathChange = Wire.def<DiffPathChange>("DiffPathChange", Wire.object({
   path: AbsolutePath
 }))
 
@@ -1948,7 +1948,7 @@ export type DiffPathPairChange = {
    */
   readonly path: AbsolutePath
 }
-export const DiffPathPairChange = W.def<DiffPathPairChange>("DiffPathPairChange", W.object({
+export const DiffPathPairChange = Wire.def<DiffPathPairChange>("DiffPathPairChange", Wire.object({
   oldPath: AbsolutePath,
   path: AbsolutePath
 }))
@@ -2000,8 +2000,8 @@ export type DiffChange = ({
    */
   readonly operation: string
 }))
-export const DiffChange = W.def<DiffChange>("DiffChange", W.allOf(
-  W.object({
+export const DiffChange = Wire.def<DiffChange>("DiffChange", Wire.allOf(
+  Wire.object({
     fileType: Schema.optionalKey(Schema.Union([
       DiffFileType,
       Schema.Null
@@ -2010,57 +2010,57 @@ export const DiffChange = W.def<DiffChange>("DiffChange", W.allOf(
       MediaType,
       Schema.Null
     ])),
-    _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+    _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
   }),
   Schema.Union([
-    W.allOf(
-      W.object({
+    Wire.allOf(
+      Wire.object({
         operation: Schema.Literal("add")
       }),
       DiffPathChange
     ),
-    W.allOf(
-      W.object({
+    Wire.allOf(
+      Wire.object({
         operation: Schema.Literal("delete")
       }),
       DiffPathChange
     ),
-    W.allOf(
-      W.object({
+    Wire.allOf(
+      Wire.object({
         operation: Schema.Literal("modify")
       }),
       DiffPathChange
     ),
-    W.allOf(
-      W.object({
+    Wire.allOf(
+      Wire.object({
         operation: Schema.Literal("move")
       }),
       DiffPathPairChange
     ),
-    W.allOf(
-      W.object({
+    Wire.allOf(
+      Wire.object({
         operation: Schema.Literal("copy")
       }),
       DiffPathPairChange
     ),
-    W.not(
-      W.object({
+    Wire.not(
+      Wire.object({
         operation: Schema.String
       }),
       Schema.Union([
-        W.object({
+        Wire.object({
           operation: Schema.Literal("add")
         }),
-        W.object({
+        Wire.object({
           operation: Schema.Literal("delete")
         }),
-        W.object({
+        Wire.object({
           operation: Schema.Literal("modify")
         }),
-        W.object({
+        Wire.object({
           operation: Schema.Literal("move")
         }),
-        W.object({
+        Wire.object({
           operation: Schema.Literal("copy")
         })
       ])
@@ -2071,8 +2071,8 @@ export const DiffChange = W.def<DiffChange>("DiffChange", W.allOf(
 /**
  * Text patch format used by [`DiffPatch`].
  */
-export type DiffPatchFormat = ("git_patch") | (string)
-export const DiffPatchFormat = W.def<DiffPatchFormat>("DiffPatchFormat", Schema.Union([
+export type DiffPatchFormat = (string)
+export const DiffPatchFormat = Wire.def<DiffPatchFormat>("DiffPatchFormat", Schema.Union([
   Schema.Literal("git_patch"),
   Schema.String
 ]))
@@ -2090,7 +2090,7 @@ export type DiffPatch = {
    */
   readonly text: string
 }
-export const DiffPatch = W.def<DiffPatch>("DiffPatch", W.object({
+export const DiffPatch = Wire.def<DiffPatch>("DiffPatch", Wire.object({
   format: DiffPatchFormat,
   text: Schema.String
 }))
@@ -2128,13 +2128,13 @@ export type Diff = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const Diff = W.def<Diff>("Diff", W.object({
+export const Diff = Wire.def<Diff>("Diff", Wire.object({
   changes: Schema.Array(DiffChange),
   patch: Schema.optionalKey(Schema.Union([
     DiffPatch,
     Schema.Null
   ])),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -2158,9 +2158,9 @@ export type Terminal = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const Terminal = W.def<Terminal>("Terminal", W.object({
+export const Terminal = Wire.def<Terminal>("Terminal", Wire.object({
   terminalId: TerminalId,
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -2187,37 +2187,37 @@ export type ToolCallContent = (({
    */
   readonly type: string
 })
-export const ToolCallContent = W.def<ToolCallContent>("ToolCallContent", Schema.Union([
-  W.allOf(
-    W.object({
+export const ToolCallContent = Wire.def<ToolCallContent>("ToolCallContent", Schema.Union([
+  Wire.allOf(
+    Wire.object({
       type: Schema.Literal("content")
     }),
     Content
   ),
-  W.allOf(
-    W.object({
+  Wire.allOf(
+    Wire.object({
       type: Schema.Literal("diff")
     }),
     Diff
   ),
-  W.allOf(
-    W.object({
+  Wire.allOf(
+    Wire.object({
       type: Schema.Literal("terminal")
     }),
     Terminal
   ),
-  W.not(
-    W.object({
+  Wire.not(
+    Wire.object({
       type: Schema.String
     }),
     Schema.Union([
-      W.object({
+      Wire.object({
         type: Schema.Literal("content")
       }),
-      W.object({
+      Wire.object({
         type: Schema.Literal("diff")
       }),
-      W.object({
+      Wire.object({
         type: Schema.Literal("terminal")
       })
     ])
@@ -2228,7 +2228,7 @@ export const ToolCallContent = W.def<ToolCallContent>("ToolCallContent", Schema.
  * Unique identifier for a tool call within a session.
  */
 export type ToolCallId = string
-export const ToolCallId = W.def<ToolCallId>("ToolCallId", Schema.String)
+export const ToolCallId = Wire.def<ToolCallId>("ToolCallId", Schema.String)
 
 /**
  * A streamed item of tool-call content.
@@ -2256,10 +2256,10 @@ export type ToolCallContentChunk = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const ToolCallContentChunk = W.def<ToolCallContentChunk>("ToolCallContentChunk", W.object({
+export const ToolCallContentChunk = Wire.def<ToolCallContentChunk>("ToolCallContentChunk", Wire.object({
   toolCallId: ToolCallId,
   content: ToolCallContent,
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -2288,10 +2288,10 @@ export type ToolCallLocation = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const ToolCallLocation = W.def<ToolCallLocation>("ToolCallLocation", W.object({
+export const ToolCallLocation = Wire.def<ToolCallLocation>("ToolCallLocation", Wire.object({
   path: AbsolutePath,
-  line: Schema.optionalKey(Schema.Union([W.integer.check(Schema.isGreaterThanOrEqualTo(0)), Schema.Null])),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  line: Schema.optionalKey(Schema.Union([Wire.integer.check(Schema.isGreaterThanOrEqualTo(0)), Schema.Null])),
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -2301,8 +2301,8 @@ export const ToolCallLocation = W.def<ToolCallLocation>("ToolCallLocation", W.ob
  *
  * See protocol docs: [Status](https://agentclientprotocol.com/protocol/v2/tool-calls#status)
  */
-export type ToolCallStatus = ("pending") | ("in_progress") | ("completed") | ("failed") | ("cancelled") | (string)
-export const ToolCallStatus = W.def<ToolCallStatus>("ToolCallStatus", Schema.Union([
+export type ToolCallStatus = (string)
+export const ToolCallStatus = Wire.def<ToolCallStatus>("ToolCallStatus", Schema.Union([
   Schema.Literal("pending"),
   Schema.Literal("in_progress"),
   Schema.Literal("completed"),
@@ -2319,8 +2319,8 @@ export const ToolCallStatus = W.def<ToolCallStatus>("ToolCallStatus", Schema.Uni
  *
  * See protocol docs: [Creating](https://agentclientprotocol.com/protocol/v2/tool-calls#creating)
  */
-export type ToolKind = ("read") | ("edit") | ("delete") | ("move") | ("search") | ("execute") | ("think") | ("fetch") | ("switch_mode") | ("other") | (string)
-export const ToolKind = W.def<ToolKind>("ToolKind", Schema.Union([
+export type ToolKind = (string)
+export const ToolKind = Wire.def<ToolKind>("ToolKind", Schema.Union([
   Schema.Literal("read"),
   Schema.Literal("edit"),
   Schema.Literal("delete"),
@@ -2402,7 +2402,7 @@ export type ToolCallUpdate = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const ToolCallUpdate = W.def<ToolCallUpdate>("ToolCallUpdate", W.object({
+export const ToolCallUpdate = Wire.def<ToolCallUpdate>("ToolCallUpdate", Wire.object({
   toolCallId: ToolCallId,
   name: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
   title: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
@@ -2418,7 +2418,7 @@ export const ToolCallUpdate = W.def<ToolCallUpdate>("ToolCallUpdate", W.object({
   locations: Schema.optionalKey(Schema.Union([Schema.Array(ToolCallLocation), Schema.Null])),
   rawInput: Schema.optionalKey(Schema.Unknown),
   rawOutput: Schema.optionalKey(Schema.Unknown),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -2442,10 +2442,10 @@ export type Cost = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const Cost = W.def<Cost>("Cost", W.object({
+export const Cost = Wire.def<Cost>("Cost", Wire.object({
   amount: Schema.Finite,
   currency: Schema.String.check(Schema.isPattern(new RegExp("^[A-Z]{3}$", "u"))),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -2473,14 +2473,14 @@ export type UsageUpdate = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const UsageUpdate = W.def<UsageUpdate>("UsageUpdate", W.object({
-  used: W.integer.check(Schema.isGreaterThanOrEqualTo(0)),
-  size: W.integer.check(Schema.isGreaterThanOrEqualTo(0)),
+export const UsageUpdate = Wire.def<UsageUpdate>("UsageUpdate", Wire.object({
+  used: Wire.integer.check(Schema.isGreaterThanOrEqualTo(0)),
+  size: Wire.integer.check(Schema.isGreaterThanOrEqualTo(0)),
   cost: Schema.optionalKey(Schema.Union([
     Cost,
     Schema.Null
   ])),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -2516,10 +2516,10 @@ export type UserMessage = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const UserMessage = W.def<UserMessage>("UserMessage", W.object({
+export const UserMessage = Wire.def<UserMessage>("UserMessage", Wire.object({
   messageId: MessageId,
   content: Schema.optionalKey(Schema.Union([Schema.Array(ContentBlock), Schema.Null])),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -2571,154 +2571,154 @@ export type SessionUpdate = (({
    */
   readonly sessionUpdate: string
 })
-export const SessionUpdate = W.def<SessionUpdate>("SessionUpdate", Schema.Union([
-  W.allOf(
-    W.object({
+export const SessionUpdate = Wire.def<SessionUpdate>("SessionUpdate", Schema.Union([
+  Wire.allOf(
+    Wire.object({
       sessionUpdate: Schema.Literal("user_message_chunk")
     }),
     ContentChunk
   ),
-  W.allOf(
-    W.object({
+  Wire.allOf(
+    Wire.object({
       sessionUpdate: Schema.Literal("user_message")
     }),
     UserMessage
   ),
-  W.allOf(
-    W.object({
+  Wire.allOf(
+    Wire.object({
       sessionUpdate: Schema.Literal("agent_message_chunk")
     }),
     ContentChunk
   ),
-  W.allOf(
-    W.object({
+  Wire.allOf(
+    Wire.object({
       sessionUpdate: Schema.Literal("agent_message")
     }),
     AgentMessage
   ),
-  W.allOf(
-    W.object({
+  Wire.allOf(
+    Wire.object({
       sessionUpdate: Schema.Literal("agent_thought_chunk")
     }),
     ContentChunk
   ),
-  W.allOf(
-    W.object({
+  Wire.allOf(
+    Wire.object({
       sessionUpdate: Schema.Literal("agent_thought")
     }),
     AgentThought
   ),
-  W.allOf(
-    W.object({
+  Wire.allOf(
+    Wire.object({
       sessionUpdate: Schema.Literal("state_update")
     }),
     StateUpdate
   ),
-  W.allOf(
-    W.object({
+  Wire.allOf(
+    Wire.object({
       sessionUpdate: Schema.Literal("tool_call_content_chunk")
     }),
     ToolCallContentChunk
   ),
-  W.allOf(
-    W.object({
+  Wire.allOf(
+    Wire.object({
       sessionUpdate: Schema.Literal("tool_call_update")
     }),
     ToolCallUpdate
   ),
-  W.allOf(
-    W.object({
+  Wire.allOf(
+    Wire.object({
       sessionUpdate: Schema.Literal("terminal_update")
     }),
     TerminalUpdate
   ),
-  W.allOf(
-    W.object({
+  Wire.allOf(
+    Wire.object({
       sessionUpdate: Schema.Literal("terminal_output_chunk")
     }),
     TerminalOutputChunk
   ),
-  W.allOf(
-    W.object({
+  Wire.allOf(
+    Wire.object({
       sessionUpdate: Schema.Literal("plan_update")
     }),
     PlanUpdate
   ),
-  W.allOf(
-    W.object({
+  Wire.allOf(
+    Wire.object({
       sessionUpdate: Schema.Literal("available_commands_update")
     }),
     AvailableCommandsUpdate
   ),
-  W.allOf(
-    W.object({
+  Wire.allOf(
+    Wire.object({
       sessionUpdate: Schema.Literal("config_option_update")
     }),
     ConfigOptionUpdate
   ),
-  W.allOf(
-    W.object({
+  Wire.allOf(
+    Wire.object({
       sessionUpdate: Schema.Literal("session_info_update")
     }),
     SessionInfoUpdate
   ),
-  W.allOf(
-    W.object({
+  Wire.allOf(
+    Wire.object({
       sessionUpdate: Schema.Literal("usage_update")
     }),
     UsageUpdate
   ),
-  W.not(
-    W.object({
+  Wire.not(
+    Wire.object({
       sessionUpdate: Schema.String
     }),
     Schema.Union([
-      W.object({
+      Wire.object({
         sessionUpdate: Schema.Literal("user_message_chunk")
       }),
-      W.object({
+      Wire.object({
         sessionUpdate: Schema.Literal("user_message")
       }),
-      W.object({
+      Wire.object({
         sessionUpdate: Schema.Literal("agent_message_chunk")
       }),
-      W.object({
+      Wire.object({
         sessionUpdate: Schema.Literal("agent_message")
       }),
-      W.object({
+      Wire.object({
         sessionUpdate: Schema.Literal("agent_thought_chunk")
       }),
-      W.object({
+      Wire.object({
         sessionUpdate: Schema.Literal("agent_thought")
       }),
-      W.object({
+      Wire.object({
         sessionUpdate: Schema.Literal("state_update")
       }),
-      W.object({
+      Wire.object({
         sessionUpdate: Schema.Literal("tool_call_content_chunk")
       }),
-      W.object({
+      Wire.object({
         sessionUpdate: Schema.Literal("tool_call_update")
       }),
-      W.object({
+      Wire.object({
         sessionUpdate: Schema.Literal("terminal_update")
       }),
-      W.object({
+      Wire.object({
         sessionUpdate: Schema.Literal("terminal_output_chunk")
       }),
-      W.object({
+      Wire.object({
         sessionUpdate: Schema.Literal("plan_update")
       }),
-      W.object({
+      Wire.object({
         sessionUpdate: Schema.Literal("available_commands_update")
       }),
-      W.object({
+      Wire.object({
         sessionUpdate: Schema.Literal("config_option_update")
       }),
-      W.object({
+      Wire.object({
         sessionUpdate: Schema.Literal("session_info_update")
       }),
-      W.object({
+      Wire.object({
         sessionUpdate: Schema.Literal("usage_update")
       })
     ])
@@ -2750,10 +2750,10 @@ export type UpdateSessionNotification = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const UpdateSessionNotification = W.def<UpdateSessionNotification>("UpdateSessionNotification", W.object({
+export const UpdateSessionNotification = Wire.def<UpdateSessionNotification>("UpdateSessionNotification", Wire.object({
   sessionId: SessionId,
   update: SessionUpdate,
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -2767,9 +2767,9 @@ export type AgentNotification = {
   /**
    * Method-specific notification parameters.
    */
-  readonly params?: ((UpdateSessionNotification) | (CompleteElicitationNotification) | (ExtNotification)) | (null)
+  readonly params?: unknown
 }
-export const AgentNotification = W.def<AgentNotification>("AgentNotification", W.object({
+export const AgentNotification = Wire.def<AgentNotification>("AgentNotification", Wire.object({
   method: Schema.String,
   params: Schema.optionalKey(Schema.Union([
     Schema.Union([
@@ -2793,9 +2793,9 @@ export const AgentNotification = W.def<AgentNotification>("AgentNotification", W
  * \[2\] Fractional parts may be problematic, since many decimal fractions cannot be represented exactly as binary fractions.
  */
 export type RequestId = (null) | (number) | (string)
-export const RequestId = W.def<RequestId>("RequestId", Schema.Union([
+export const RequestId = Wire.def<RequestId>("RequestId", Schema.Union([
   Schema.Null,
-  W.integer,
+  Wire.integer,
   Schema.String
 ]))
 
@@ -2809,7 +2809,7 @@ export type ElicitationRequestScope = {
    */
   readonly requestId: RequestId
 }
-export const ElicitationRequestScope = W.def<ElicitationRequestScope>("ElicitationRequestScope", W.object({
+export const ElicitationRequestScope = Wire.def<ElicitationRequestScope>("ElicitationRequestScope", Wire.object({
   requestId: RequestId
 }))
 
@@ -2846,11 +2846,11 @@ export type BooleanPropertySchema = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const BooleanPropertySchema = W.def<BooleanPropertySchema>("BooleanPropertySchema", W.object({
+export const BooleanPropertySchema = Wire.def<BooleanPropertySchema>("BooleanPropertySchema", Wire.object({
   title: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
   description: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
   default: Schema.optionalKey(Schema.Union([Schema.Boolean, Schema.Null])),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -2898,13 +2898,13 @@ export type IntegerPropertySchema = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const IntegerPropertySchema = W.def<IntegerPropertySchema>("IntegerPropertySchema", W.object({
+export const IntegerPropertySchema = Wire.def<IntegerPropertySchema>("IntegerPropertySchema", Wire.object({
   title: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
   description: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
-  minimum: Schema.optionalKey(Schema.Union([W.integer, Schema.Null])),
-  maximum: Schema.optionalKey(Schema.Union([W.integer, Schema.Null])),
-  default: Schema.optionalKey(Schema.Union([W.integer, Schema.Null])),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  minimum: Schema.optionalKey(Schema.Union([Wire.integer, Schema.Null])),
+  maximum: Schema.optionalKey(Schema.Union([Wire.integer, Schema.Null])),
+  default: Schema.optionalKey(Schema.Union([Wire.integer, Schema.Null])),
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -2926,9 +2926,9 @@ export type StringMultiSelectItems = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const StringMultiSelectItems = W.def<StringMultiSelectItems>("StringMultiSelectItems", W.object({
+export const StringMultiSelectItems = Wire.def<StringMultiSelectItems>("StringMultiSelectItems", Wire.object({
   enum: Schema.Array(Schema.String).check(Schema.isMinLength(1)),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -2960,11 +2960,11 @@ export type EnumOption = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const EnumOption = W.def<EnumOption>("EnumOption", W.object({
+export const EnumOption = Wire.def<EnumOption>("EnumOption", Wire.object({
   const: Schema.String,
   title: Schema.String,
   description: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -2986,9 +2986,9 @@ export type TitledMultiSelectItems = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const TitledMultiSelectItems = W.def<TitledMultiSelectItems>("TitledMultiSelectItems", W.object({
+export const TitledMultiSelectItems = Wire.def<TitledMultiSelectItems>("TitledMultiSelectItems", Wire.object({
   anyOf: Schema.Array(EnumOption).check(Schema.isMinLength(1)),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -3006,18 +3006,18 @@ export type MultiSelectItems = (({
    */
   readonly type: string
 }) | (TitledMultiSelectItems)
-export const MultiSelectItems = W.def<MultiSelectItems>("MultiSelectItems", Schema.Union([
-  W.allOf(
-    W.object({
+export const MultiSelectItems = Wire.def<MultiSelectItems>("MultiSelectItems", Schema.Union([
+  Wire.allOf(
+    Wire.object({
       type: Schema.Literal("string")
     }),
     StringMultiSelectItems
   ),
-  W.not(
-    W.object({
+  Wire.not(
+    Wire.object({
       type: Schema.String
     }),
-    W.object({
+    Wire.object({
       type: Schema.Literal("string")
     })
   ),
@@ -3073,14 +3073,14 @@ export type MultiSelectPropertySchema = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const MultiSelectPropertySchema = W.def<MultiSelectPropertySchema>("MultiSelectPropertySchema", W.object({
+export const MultiSelectPropertySchema = Wire.def<MultiSelectPropertySchema>("MultiSelectPropertySchema", Wire.object({
   title: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
   description: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
-  minItems: Schema.optionalKey(Schema.Union([W.integer.check(Schema.isGreaterThanOrEqualTo(0)), Schema.Null])),
-  maxItems: Schema.optionalKey(Schema.Union([W.integer.check(Schema.isGreaterThanOrEqualTo(0)), Schema.Null])),
+  minItems: Schema.optionalKey(Schema.Union([Wire.integer.check(Schema.isGreaterThanOrEqualTo(0)), Schema.Null])),
+  maxItems: Schema.optionalKey(Schema.Union([Wire.integer.check(Schema.isGreaterThanOrEqualTo(0)), Schema.Null])),
   items: MultiSelectItems,
   default: Schema.optionalKey(Schema.Union([Schema.Array(Schema.String), Schema.Null])),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -3128,20 +3128,20 @@ export type NumberPropertySchema = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const NumberPropertySchema = W.def<NumberPropertySchema>("NumberPropertySchema", W.object({
+export const NumberPropertySchema = Wire.def<NumberPropertySchema>("NumberPropertySchema", Wire.object({
   title: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
   description: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
   minimum: Schema.optionalKey(Schema.Union([Schema.Finite, Schema.Null])),
   maximum: Schema.optionalKey(Schema.Union([Schema.Finite, Schema.Null])),
   default: Schema.optionalKey(Schema.Union([Schema.Finite, Schema.Null])),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
  * String format types for string properties in elicitation schemas.
  */
-export type StringFormat = ("email") | ("uri") | ("date") | ("date-time") | (string)
-export const StringFormat = W.def<StringFormat>("StringFormat", Schema.Union([
+export type StringFormat = (string)
+export const StringFormat = Wire.def<StringFormat>("StringFormat", Schema.Union([
   Schema.Literal("email"),
   Schema.Literal("uri"),
   Schema.Literal("date"),
@@ -3223,11 +3223,11 @@ export type StringPropertySchema = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const StringPropertySchema = W.def<StringPropertySchema>("StringPropertySchema", W.object({
+export const StringPropertySchema = Wire.def<StringPropertySchema>("StringPropertySchema", Wire.object({
   title: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
   description: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
-  minLength: Schema.optionalKey(Schema.Union([W.integer.check(Schema.isGreaterThanOrEqualTo(0)), Schema.Null])),
-  maxLength: Schema.optionalKey(Schema.Union([W.integer.check(Schema.isGreaterThanOrEqualTo(0)), Schema.Null])),
+  minLength: Schema.optionalKey(Schema.Union([Wire.integer.check(Schema.isGreaterThanOrEqualTo(0)), Schema.Null])),
+  maxLength: Schema.optionalKey(Schema.Union([Wire.integer.check(Schema.isGreaterThanOrEqualTo(0)), Schema.Null])),
   pattern: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
   format: Schema.optionalKey(Schema.Union([
     StringFormat,
@@ -3236,7 +3236,7 @@ export const StringPropertySchema = W.def<StringPropertySchema>("StringPropertyS
   default: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
   enum: Schema.optionalKey(Schema.Union([Schema.Array(Schema.String).check(Schema.isMinLength(1)), Schema.Null])),
   oneOf: Schema.optionalKey(Schema.Union([Schema.Array(EnumOption).check(Schema.isMinLength(1)), Schema.Null])),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -3266,55 +3266,55 @@ export type ElicitationPropertySchema = (({
    */
   readonly type: string
 })
-export const ElicitationPropertySchema = W.def<ElicitationPropertySchema>("ElicitationPropertySchema", Schema.Union([
-  W.allOf(
-    W.object({
+export const ElicitationPropertySchema = Wire.def<ElicitationPropertySchema>("ElicitationPropertySchema", Schema.Union([
+  Wire.allOf(
+    Wire.object({
       type: Schema.Literal("string")
     }),
     StringPropertySchema
   ),
-  W.allOf(
-    W.object({
+  Wire.allOf(
+    Wire.object({
       type: Schema.Literal("number")
     }),
     NumberPropertySchema
   ),
-  W.allOf(
-    W.object({
+  Wire.allOf(
+    Wire.object({
       type: Schema.Literal("integer")
     }),
     IntegerPropertySchema
   ),
-  W.allOf(
-    W.object({
+  Wire.allOf(
+    Wire.object({
       type: Schema.Literal("boolean")
     }),
     BooleanPropertySchema
   ),
-  W.allOf(
-    W.object({
+  Wire.allOf(
+    Wire.object({
       type: Schema.Literal("array")
     }),
     MultiSelectPropertySchema
   ),
-  W.not(
-    W.object({
+  Wire.not(
+    Wire.object({
       type: Schema.String
     }),
     Schema.Union([
-      W.object({
+      Wire.object({
         type: Schema.Literal("string")
       }),
-      W.object({
+      Wire.object({
         type: Schema.Literal("number")
       }),
-      W.object({
+      Wire.object({
         type: Schema.Literal("integer")
       }),
-      W.object({
+      Wire.object({
         type: Schema.Literal("boolean")
       }),
-      W.object({
+      Wire.object({
         type: Schema.Literal("array")
       })
     ])
@@ -3325,7 +3325,7 @@ export const ElicitationPropertySchema = W.def<ElicitationPropertySchema>("Elici
  * Type discriminator for elicitation schemas.
  */
 export type ElicitationSchemaType = "object"
-export const ElicitationSchemaType = W.def<ElicitationSchemaType>("ElicitationSchemaType", Schema.Literal("object"))
+export const ElicitationSchemaType = Wire.def<ElicitationSchemaType>("ElicitationSchemaType", Schema.Literal("object"))
 
 /**
  * Type-safe elicitation schema for requesting structured user input.
@@ -3371,13 +3371,13 @@ export type ElicitationSchema = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const ElicitationSchema = W.def<ElicitationSchema>("ElicitationSchema", W.object({
+export const ElicitationSchema = Wire.def<ElicitationSchema>("ElicitationSchema", Wire.object({
   type: Schema.optionalKey(ElicitationSchemaType),
   title: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
-  properties: Schema.optionalKey(W.record(ElicitationPropertySchema)),
+  properties: Schema.optionalKey(Wire.record(ElicitationPropertySchema)),
   required: Schema.optionalKey(Schema.Union([Schema.Array(Schema.String), Schema.Null])),
   description: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -3400,7 +3400,7 @@ export type ElicitationSessionScope = {
    */
   readonly toolCallId?: (ToolCallId) | (null)
 }
-export const ElicitationSessionScope = W.def<ElicitationSessionScope>("ElicitationSessionScope", W.object({
+export const ElicitationSessionScope = Wire.def<ElicitationSessionScope>("ElicitationSessionScope", Wire.object({
   sessionId: SessionId,
   toolCallId: Schema.optionalKey(Schema.Union([
     ToolCallId,
@@ -3417,8 +3417,8 @@ export type ElicitationFormMode = ({
    */
   readonly requestedSchema: ElicitationSchema
 }) & ((ElicitationSessionScope) | (ElicitationRequestScope))
-export const ElicitationFormMode = W.def<ElicitationFormMode>("ElicitationFormMode", W.allOf(
-  W.object({
+export const ElicitationFormMode = Wire.def<ElicitationFormMode>("ElicitationFormMode", Wire.allOf(
+  Wire.object({
     requestedSchema: ElicitationSchema
   }),
   Schema.Union([
@@ -3440,8 +3440,8 @@ export type ElicitationUrlMode = ({
    */
   readonly url: string
 }) & ((ElicitationSessionScope) | (ElicitationRequestScope))
-export const ElicitationUrlMode = W.def<ElicitationUrlMode>("ElicitationUrlMode", W.allOf(
-  W.object({
+export const ElicitationUrlMode = Wire.def<ElicitationUrlMode>("ElicitationUrlMode", Wire.allOf(
+  Wire.object({
     elicitationId: ElicitationId,
     url: Schema.String
   }),
@@ -3487,27 +3487,27 @@ export type CreateElicitationRequest = ({
    */
   readonly mode: string
 }) & ((ElicitationSessionScope) | (ElicitationRequestScope))))
-export const CreateElicitationRequest = W.def<CreateElicitationRequest>("CreateElicitationRequest", W.allOf(
-  W.object({
+export const CreateElicitationRequest = Wire.def<CreateElicitationRequest>("CreateElicitationRequest", Wire.allOf(
+  Wire.object({
     message: Schema.String,
-    _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+    _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
   }),
   Schema.Union([
-    W.allOf(
-      W.object({
+    Wire.allOf(
+      Wire.object({
         mode: Schema.Literal("form")
       }),
       ElicitationFormMode
     ),
-    W.allOf(
-      W.object({
+    Wire.allOf(
+      Wire.object({
         mode: Schema.Literal("url")
       }),
       ElicitationUrlMode
     ),
-    W.not(
-      W.allOf(
-        W.object({
+    Wire.not(
+      Wire.allOf(
+        Wire.object({
           mode: Schema.String
         }),
         Schema.Union([
@@ -3516,10 +3516,10 @@ export const CreateElicitationRequest = W.def<CreateElicitationRequest>("CreateE
         ])
       ),
       Schema.Union([
-        W.object({
+        Wire.object({
           mode: Schema.Literal("form")
         }),
-        W.object({
+        Wire.object({
           mode: Schema.Literal("url")
         })
       ])
@@ -3535,21 +3535,21 @@ export const CreateElicitationRequest = W.def<CreateElicitationRequest>("CreateE
  * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
  */
 export type ExtRequest = unknown
-export const ExtRequest = W.def<ExtRequest>("ExtRequest", Schema.Unknown)
+export const ExtRequest = Wire.def<ExtRequest>("ExtRequest", Schema.Unknown)
 
 /**
  * Unique identifier for a permission option.
  */
 export type PermissionOptionId = string
-export const PermissionOptionId = W.def<PermissionOptionId>("PermissionOptionId", Schema.String)
+export const PermissionOptionId = Wire.def<PermissionOptionId>("PermissionOptionId", Schema.String)
 
 /**
  * The type of permission option being presented to the user.
  *
  * Helps clients choose appropriate icons and UI treatment.
  */
-export type PermissionOptionKind = ("allow_once") | ("allow_always") | ("reject_once") | ("reject_always") | (string)
-export const PermissionOptionKind = W.def<PermissionOptionKind>("PermissionOptionKind", Schema.Union([
+export type PermissionOptionKind = (string)
+export const PermissionOptionKind = Wire.def<PermissionOptionKind>("PermissionOptionKind", Schema.Union([
   Schema.Literal("allow_once"),
   Schema.Literal("allow_always"),
   Schema.Literal("reject_once"),
@@ -3582,11 +3582,11 @@ export type PermissionOption = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const PermissionOption = W.def<PermissionOption>("PermissionOption", W.object({
+export const PermissionOption = Wire.def<PermissionOption>("PermissionOption", Wire.object({
   optionId: PermissionOptionId,
   name: Schema.String,
   kind: PermissionOptionKind,
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -3618,7 +3618,7 @@ export type CommandPermissionSubject = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const CommandPermissionSubject = W.def<CommandPermissionSubject>("CommandPermissionSubject", W.object({
+export const CommandPermissionSubject = Wire.def<CommandPermissionSubject>("CommandPermissionSubject", Wire.object({
   command: Schema.String,
   cwd: AbsolutePath,
   toolCallId: Schema.optionalKey(Schema.Union([
@@ -3629,7 +3629,7 @@ export const CommandPermissionSubject = W.def<CommandPermissionSubject>("Command
     TerminalId,
     Schema.Null
   ])),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -3641,7 +3641,7 @@ export type ToolCallPermissionSubject = {
    */
   readonly toolCall: ToolCallUpdate
 }
-export const ToolCallPermissionSubject = W.def<ToolCallPermissionSubject>("ToolCallPermissionSubject", W.object({
+export const ToolCallPermissionSubject = Wire.def<ToolCallPermissionSubject>("ToolCallPermissionSubject", Wire.object({
   toolCall: ToolCallUpdate
 }))
 
@@ -3662,28 +3662,28 @@ export type RequestPermissionSubject = (({
    */
   readonly type: string
 })
-export const RequestPermissionSubject = W.def<RequestPermissionSubject>("RequestPermissionSubject", Schema.Union([
-  W.allOf(
-    W.object({
+export const RequestPermissionSubject = Wire.def<RequestPermissionSubject>("RequestPermissionSubject", Schema.Union([
+  Wire.allOf(
+    Wire.object({
       type: Schema.Literal("tool_call")
     }),
     ToolCallPermissionSubject
   ),
-  W.allOf(
-    W.object({
+  Wire.allOf(
+    Wire.object({
       type: Schema.Literal("command")
     }),
     CommandPermissionSubject
   ),
-  W.not(
-    W.object({
+  Wire.not(
+    Wire.object({
       type: Schema.String
     }),
     Schema.Union([
-      W.object({
+      Wire.object({
         type: Schema.Literal("tool_call")
       }),
-      W.object({
+      Wire.object({
         type: Schema.Literal("command")
       })
     ])
@@ -3737,7 +3737,7 @@ export type RequestPermissionRequest = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const RequestPermissionRequest = W.def<RequestPermissionRequest>("RequestPermissionRequest", W.object({
+export const RequestPermissionRequest = Wire.def<RequestPermissionRequest>("RequestPermissionRequest", Wire.object({
   sessionId: SessionId,
   title: Schema.String,
   description: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
@@ -3746,7 +3746,7 @@ export const RequestPermissionRequest = W.def<RequestPermissionRequest>("Request
     Schema.Null
   ])),
   options: Schema.Array(PermissionOption).check(Schema.isMinLength(1)),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -3764,9 +3764,9 @@ export type AgentRequest = {
   /**
    * Method-specific request parameters.
    */
-  readonly params?: ((RequestPermissionRequest) | (CreateElicitationRequest) | (ExtRequest)) | (null)
+  readonly params?: unknown
 }
-export const AgentRequest = W.def<AgentRequest>("AgentRequest", W.object({
+export const AgentRequest = Wire.def<AgentRequest>("AgentRequest", Wire.object({
   id: RequestId,
   method: Schema.String,
   params: Schema.optionalKey(Schema.Union([
@@ -3792,8 +3792,8 @@ export type CloseSessionResponse = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const CloseSessionResponse = W.def<CloseSessionResponse>("CloseSessionResponse", W.object({
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+export const CloseSessionResponse = Wire.def<CloseSessionResponse>("CloseSessionResponse", Wire.object({
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -3809,8 +3809,8 @@ export type DeleteSessionResponse = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const DeleteSessionResponse = W.def<DeleteSessionResponse>("DeleteSessionResponse", W.object({
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+export const DeleteSessionResponse = Wire.def<DeleteSessionResponse>("DeleteSessionResponse", Wire.object({
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -3819,8 +3819,8 @@ export const DeleteSessionResponse = W.def<DeleteSessionResponse>("DeleteSession
  * These codes follow the JSON-RPC 2.0 specification for standard errors
  * and use the reserved range (-32000 to -32099) for protocol-specific errors.
  */
-export type ErrorCode = (-32700) | (-32600) | (-32601) | (-32602) | (-32603) | (-32800) | (-32000) | (-32002) | (number)
-export const ErrorCode = W.def<ErrorCode>("ErrorCode", Schema.Union([
+export type ErrorCode = (number)
+export const ErrorCode = Wire.def<ErrorCode>("ErrorCode", Schema.Union([
   Schema.Literal(-32700),
   Schema.Literal(-32600),
   Schema.Literal(-32601),
@@ -3829,7 +3829,7 @@ export const ErrorCode = W.def<ErrorCode>("ErrorCode", Schema.Union([
   Schema.Literal(-32800),
   Schema.Literal(-32000),
   Schema.Literal(-32002),
-  W.integer
+  Wire.integer
 ]))
 
 /**
@@ -3857,7 +3857,7 @@ export type Error = {
    */
   readonly data?: unknown
 }
-export const Error = W.def<Error>("Error", W.object({
+export const Error = Wire.def<Error>("Error", Wire.object({
   code: ErrorCode,
   message: Schema.String,
   data: Schema.optionalKey(Schema.Unknown)
@@ -3871,13 +3871,13 @@ export const Error = W.def<Error>("Error", W.object({
  * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
  */
 export type ExtResponse = unknown
-export const ExtResponse = W.def<ExtResponse>("ExtResponse", Schema.Unknown)
+export const ExtResponse = Wire.def<ExtResponse>("ExtResponse", Schema.Unknown)
 
 /**
  * Typed identifier used for auth method values on the wire.
  */
 export type AuthMethodId = string
-export const AuthMethodId = W.def<AuthMethodId>("AuthMethodId", Schema.String)
+export const AuthMethodId = Wire.def<AuthMethodId>("AuthMethodId", Schema.String)
 
 /**
  * Agent handles authentication itself through `auth/login`.
@@ -3906,11 +3906,11 @@ export type AuthMethodAgent = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const AuthMethodAgent = W.def<AuthMethodAgent>("AuthMethodAgent", W.object({
+export const AuthMethodAgent = Wire.def<AuthMethodAgent>("AuthMethodAgent", Wire.object({
   methodId: AuthMethodId,
   name: Schema.String,
   description: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -3934,10 +3934,10 @@ export type EnvVariable = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const EnvVariable = W.def<EnvVariable>("EnvVariable", W.object({
+export const EnvVariable = Wire.def<EnvVariable>("EnvVariable", Wire.object({
   name: Schema.String,
   value: Schema.String,
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -3981,13 +3981,13 @@ export type AuthMethodTerminal = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const AuthMethodTerminal = W.def<AuthMethodTerminal>("AuthMethodTerminal", W.object({
+export const AuthMethodTerminal = Wire.def<AuthMethodTerminal>("AuthMethodTerminal", Wire.object({
   methodId: AuthMethodId,
   name: Schema.String,
   description: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
   args: Schema.optionalKey(Schema.Array(Schema.String)),
   env: Schema.optionalKey(Schema.Array(EnvVariable)),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -4029,32 +4029,32 @@ export type AuthMethod = (({
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 })
-export const AuthMethod = W.def<AuthMethod>("AuthMethod", Schema.Union([
-  W.allOf(
-    W.object({
+export const AuthMethod = Wire.def<AuthMethod>("AuthMethod", Schema.Union([
+  Wire.allOf(
+    Wire.object({
       type: Schema.Literal("terminal")
     }),
     AuthMethodTerminal
   ),
-  W.allOf(
-    W.object({
+  Wire.allOf(
+    Wire.object({
       type: Schema.Literal("agent")
     }),
     AuthMethodAgent
   ),
-  W.not(
-    W.object({
+  Wire.not(
+    Wire.object({
       type: Schema.String,
       methodId: AuthMethodId,
       name: Schema.String,
       description: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
-      _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+      _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
     }),
     Schema.Union([
-      W.object({
+      Wire.object({
         type: Schema.Literal("agent")
       }),
-      W.object({
+      Wire.object({
         type: Schema.Literal("terminal")
       })
     ])
@@ -4093,11 +4093,11 @@ export type Implementation = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const Implementation = W.def<Implementation>("Implementation", W.object({
+export const Implementation = Wire.def<Implementation>("Implementation", Wire.object({
   name: Schema.String,
   title: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
   version: Schema.String,
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -4107,7 +4107,7 @@ export const Implementation = W.def<Implementation>("Implementation", W.object({
  * Non-breaking changes should be introduced via capabilities.
  */
 export type ProtocolVersion = number
-export const ProtocolVersion = W.def<ProtocolVersion>("ProtocolVersion", W.integer.check(Schema.isGreaterThanOrEqualTo(0), Schema.isLessThanOrEqualTo(65535)))
+export const ProtocolVersion = Wire.def<ProtocolVersion>("ProtocolVersion", Wire.integer.check(Schema.isGreaterThanOrEqualTo(0), Schema.isLessThanOrEqualTo(65535)))
 
 /**
  * Response to the `initialize` method.
@@ -4149,12 +4149,12 @@ export type InitializeResponse = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const InitializeResponse = W.def<InitializeResponse>("InitializeResponse", W.object({
+export const InitializeResponse = Wire.def<InitializeResponse>("InitializeResponse", Wire.object({
   protocolVersion: ProtocolVersion,
   info: Implementation,
   capabilities: Schema.optionalKey(AgentCapabilities),
   authMethods: Schema.optionalKey(Schema.Array(AuthMethod)),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -4194,20 +4194,20 @@ export type SessionInfo = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const SessionInfo = W.def<SessionInfo>("SessionInfo", W.object({
+export const SessionInfo = Wire.def<SessionInfo>("SessionInfo", Wire.object({
   sessionId: SessionId,
   cwd: AbsolutePath,
   additionalDirectories: Schema.optionalKey(Schema.Array(AbsolutePath)),
   title: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
   updatedAt: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
  * An opaque cursor used to paginate `session/list` results.
  */
 export type SessionListCursor = string
-export const SessionListCursor = W.def<SessionListCursor>("SessionListCursor", Schema.String)
+export const SessionListCursor = Wire.def<SessionListCursor>("SessionListCursor", Schema.String)
 
 /**
  * Response from listing sessions.
@@ -4231,13 +4231,13 @@ export type ListSessionsResponse = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const ListSessionsResponse = W.def<ListSessionsResponse>("ListSessionsResponse", W.object({
+export const ListSessionsResponse = Wire.def<ListSessionsResponse>("ListSessionsResponse", Wire.object({
   sessions: Schema.Array(SessionInfo),
   nextCursor: Schema.optionalKey(Schema.Union([
     SessionListCursor,
     Schema.Null
   ])),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -4253,8 +4253,8 @@ export type LoginAuthResponse = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const LoginAuthResponse = W.def<LoginAuthResponse>("LoginAuthResponse", W.object({
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+export const LoginAuthResponse = Wire.def<LoginAuthResponse>("LoginAuthResponse", Wire.object({
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -4270,8 +4270,8 @@ export type LogoutAuthResponse = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const LogoutAuthResponse = W.def<LogoutAuthResponse>("LogoutAuthResponse", W.object({
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+export const LogoutAuthResponse = Wire.def<LogoutAuthResponse>("LogoutAuthResponse", Wire.object({
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -4299,10 +4299,10 @@ export type NewSessionResponse = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const NewSessionResponse = W.def<NewSessionResponse>("NewSessionResponse", W.object({
+export const NewSessionResponse = Wire.def<NewSessionResponse>("NewSessionResponse", Wire.object({
   sessionId: SessionId,
   configOptions: Schema.optionalKey(Schema.Array(SessionConfigOption)),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -4334,9 +4334,9 @@ export type PromptResponse = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const PromptResponse = W.def<PromptResponse>("PromptResponse", W.object({
+export const PromptResponse = Wire.def<PromptResponse>("PromptResponse", Wire.object({
   messageId: MessageId,
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -4356,9 +4356,9 @@ export type ResumeSessionResponse = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const ResumeSessionResponse = W.def<ResumeSessionResponse>("ResumeSessionResponse", W.object({
+export const ResumeSessionResponse = Wire.def<ResumeSessionResponse>("ResumeSessionResponse", Wire.object({
   configOptions: Schema.optionalKey(Schema.Array(SessionConfigOption)),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -4378,9 +4378,9 @@ export type SetSessionConfigOptionResponse = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const SetSessionConfigOptionResponse = W.def<SetSessionConfigOptionResponse>("SetSessionConfigOptionResponse", W.object({
+export const SetSessionConfigOptionResponse = Wire.def<SetSessionConfigOptionResponse>("SetSessionConfigOptionResponse", Wire.object({
   configOptions: Schema.Array(SessionConfigOption),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -4394,7 +4394,7 @@ export type AgentResponse = ({
   /**
    * Method-specific response data.
    */
-  readonly result: (InitializeResponse) | (LoginAuthResponse) | (LogoutAuthResponse) | (NewSessionResponse) | (ListSessionsResponse) | (DeleteSessionResponse) | (ResumeSessionResponse) | (CloseSessionResponse) | (SetSessionConfigOptionResponse) | (PromptResponse) | (ExtResponse)
+  readonly result: unknown
 }) | ({
   /**
    * The id of the request this response answers.
@@ -4405,8 +4405,8 @@ export type AgentResponse = ({
    */
   readonly error: Error
 })
-export const AgentResponse = W.def<AgentResponse>("AgentResponse", Schema.Union([
-  W.object({
+export const AgentResponse = Wire.def<AgentResponse>("AgentResponse", Schema.Union([
+  Wire.object({
     id: RequestId,
     result: Schema.Union([
       InitializeResponse,
@@ -4422,7 +4422,7 @@ export const AgentResponse = W.def<AgentResponse>("AgentResponse", Schema.Union(
       ExtResponse
     ])
   }),
-  W.object({
+  Wire.object({
     id: RequestId,
     error: Error
   })
@@ -4445,8 +4445,8 @@ export type TerminalAuthCapabilities = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const TerminalAuthCapabilities = W.def<TerminalAuthCapabilities>("TerminalAuthCapabilities", W.object({
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+export const TerminalAuthCapabilities = Wire.def<TerminalAuthCapabilities>("TerminalAuthCapabilities", Wire.object({
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -4475,12 +4475,12 @@ export type AuthCapabilities = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const AuthCapabilities = W.def<AuthCapabilities>("AuthCapabilities", W.object({
+export const AuthCapabilities = Wire.def<AuthCapabilities>("AuthCapabilities", Wire.object({
   terminal: Schema.optionalKey(Schema.Union([
     TerminalAuthCapabilities,
     Schema.Null
   ])),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -4502,9 +4502,9 @@ export type CancelRequestNotification = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const CancelRequestNotification = W.def<CancelRequestNotification>("CancelRequestNotification", W.object({
+export const CancelRequestNotification = Wire.def<CancelRequestNotification>("CancelRequestNotification", Wire.object({
   requestId: RequestId,
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -4526,9 +4526,9 @@ export type CancelSessionNotification = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const CancelSessionNotification = W.def<CancelSessionNotification>("CancelSessionNotification", W.object({
+export const CancelSessionNotification = Wire.def<CancelSessionNotification>("CancelSessionNotification", Wire.object({
   sessionId: SessionId,
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -4548,8 +4548,8 @@ export type ElicitationFormCapabilities = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const ElicitationFormCapabilities = W.def<ElicitationFormCapabilities>("ElicitationFormCapabilities", W.object({
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+export const ElicitationFormCapabilities = Wire.def<ElicitationFormCapabilities>("ElicitationFormCapabilities", Wire.object({
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -4569,8 +4569,8 @@ export type ElicitationUrlCapabilities = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const ElicitationUrlCapabilities = W.def<ElicitationUrlCapabilities>("ElicitationUrlCapabilities", W.object({
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+export const ElicitationUrlCapabilities = Wire.def<ElicitationUrlCapabilities>("ElicitationUrlCapabilities", Wire.object({
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -4602,7 +4602,7 @@ export type ElicitationCapabilities = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const ElicitationCapabilities = W.def<ElicitationCapabilities>("ElicitationCapabilities", W.object({
+export const ElicitationCapabilities = Wire.def<ElicitationCapabilities>("ElicitationCapabilities", Wire.object({
   form: Schema.optionalKey(Schema.Union([
     ElicitationFormCapabilities,
     Schema.Null
@@ -4611,7 +4611,7 @@ export const ElicitationCapabilities = W.def<ElicitationCapabilities>("Elicitati
     ElicitationUrlCapabilities,
     Schema.Null
   ])),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -4649,7 +4649,7 @@ export type ClientCapabilities = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const ClientCapabilities = W.def<ClientCapabilities>("ClientCapabilities", W.object({
+export const ClientCapabilities = Wire.def<ClientCapabilities>("ClientCapabilities", Wire.object({
   auth: Schema.optionalKey(Schema.Union([
     AuthCapabilities,
     Schema.Null
@@ -4658,7 +4658,7 @@ export const ClientCapabilities = W.def<ClientCapabilities>("ClientCapabilities"
     ElicitationCapabilities,
     Schema.Null
   ])),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -4672,9 +4672,9 @@ export type ClientNotification = {
   /**
    * Method-specific notification parameters.
    */
-  readonly params?: ((CancelSessionNotification) | (ExtNotification)) | (null)
+  readonly params?: unknown
 }
-export const ClientNotification = W.def<ClientNotification>("ClientNotification", W.object({
+export const ClientNotification = Wire.def<ClientNotification>("ClientNotification", Wire.object({
   method: Schema.String,
   params: Schema.optionalKey(Schema.Union([
     Schema.Union([
@@ -4706,9 +4706,9 @@ export type CloseSessionRequest = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const CloseSessionRequest = W.def<CloseSessionRequest>("CloseSessionRequest", W.object({
+export const CloseSessionRequest = Wire.def<CloseSessionRequest>("CloseSessionRequest", Wire.object({
   sessionId: SessionId,
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -4730,9 +4730,9 @@ export type DeleteSessionRequest = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const DeleteSessionRequest = W.def<DeleteSessionRequest>("DeleteSessionRequest", W.object({
+export const DeleteSessionRequest = Wire.def<DeleteSessionRequest>("DeleteSessionRequest", Wire.object({
   sessionId: SessionId,
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -4764,11 +4764,11 @@ export type InitializeRequest = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const InitializeRequest = W.def<InitializeRequest>("InitializeRequest", W.object({
+export const InitializeRequest = Wire.def<InitializeRequest>("InitializeRequest", Wire.object({
   protocolVersion: ProtocolVersion,
   info: Implementation,
   capabilities: Schema.optionalKey(ClientCapabilities),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -4792,7 +4792,7 @@ export type ListSessionsRequest = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const ListSessionsRequest = W.def<ListSessionsRequest>("ListSessionsRequest", W.object({
+export const ListSessionsRequest = Wire.def<ListSessionsRequest>("ListSessionsRequest", Wire.object({
   cwd: Schema.optionalKey(Schema.Union([
     AbsolutePath,
     Schema.Null
@@ -4801,7 +4801,7 @@ export const ListSessionsRequest = W.def<ListSessionsRequest>("ListSessionsReque
     SessionListCursor,
     Schema.Null
   ])),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -4828,9 +4828,9 @@ export type LoginAuthRequest = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const LoginAuthRequest = W.def<LoginAuthRequest>("LoginAuthRequest", W.object({
+export const LoginAuthRequest = Wire.def<LoginAuthRequest>("LoginAuthRequest", Wire.object({
   methodId: AuthMethodId,
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -4852,8 +4852,8 @@ export type LogoutAuthRequest = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const LogoutAuthRequest = W.def<LogoutAuthRequest>("LogoutAuthRequest", W.object({
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+export const LogoutAuthRequest = Wire.def<LogoutAuthRequest>("LogoutAuthRequest", Wire.object({
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -4877,10 +4877,10 @@ export type HttpHeader = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const HttpHeader = W.def<HttpHeader>("HttpHeader", W.object({
+export const HttpHeader = Wire.def<HttpHeader>("HttpHeader", Wire.object({
   name: Schema.String,
   value: Schema.String,
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -4908,11 +4908,11 @@ export type McpServerHttp = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const McpServerHttp = W.def<McpServerHttp>("McpServerHttp", W.object({
+export const McpServerHttp = Wire.def<McpServerHttp>("McpServerHttp", Wire.object({
   name: Schema.String,
   url: Schema.String,
   headers: Schema.optionalKey(Schema.Array(HttpHeader)),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -4944,12 +4944,12 @@ export type McpServerStdio = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const McpServerStdio = W.def<McpServerStdio>("McpServerStdio", W.object({
+export const McpServerStdio = Wire.def<McpServerStdio>("McpServerStdio", Wire.object({
   name: Schema.String,
   command: AbsolutePath,
   args: Schema.optionalKey(Schema.Array(Schema.String)),
   env: Schema.optionalKey(Schema.Array(EnvVariable)),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -4974,28 +4974,28 @@ export type McpServer = (({
    */
   readonly type: string
 })
-export const McpServer = W.def<McpServer>("McpServer", Schema.Union([
-  W.allOf(
-    W.object({
+export const McpServer = Wire.def<McpServer>("McpServer", Schema.Union([
+  Wire.allOf(
+    Wire.object({
       type: Schema.Literal("http")
     }),
     McpServerHttp
   ),
-  W.allOf(
-    W.object({
+  Wire.allOf(
+    Wire.object({
       type: Schema.Literal("stdio")
     }),
     McpServerStdio
   ),
-  W.not(
-    W.object({
+  Wire.not(
+    Wire.object({
       type: Schema.String
     }),
     Schema.Union([
-      W.object({
+      Wire.object({
         type: Schema.Literal("http")
       }),
-      W.object({
+      Wire.object({
         type: Schema.Literal("stdio")
       })
     ])
@@ -5033,11 +5033,11 @@ export type NewSessionRequest = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const NewSessionRequest = W.def<NewSessionRequest>("NewSessionRequest", W.object({
+export const NewSessionRequest = Wire.def<NewSessionRequest>("NewSessionRequest", Wire.object({
   cwd: AbsolutePath,
   additionalDirectories: Schema.optionalKey(Schema.Array(AbsolutePath)),
   mcpServers: Schema.optionalKey(Schema.Array(McpServer)),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -5077,10 +5077,10 @@ export type PromptRequest = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const PromptRequest = W.def<PromptRequest>("PromptRequest", W.object({
+export const PromptRequest = Wire.def<PromptRequest>("PromptRequest", Wire.object({
   sessionId: SessionId,
   prompt: Schema.Array(ContentBlock),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -5096,8 +5096,8 @@ export type ReplayFromStart = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const ReplayFromStart = W.def<ReplayFromStart>("ReplayFromStart", W.object({
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+export const ReplayFromStart = Wire.def<ReplayFromStart>("ReplayFromStart", Wire.object({
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -5125,19 +5125,19 @@ export type ReplayFrom = (({
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 })
-export const ReplayFrom = W.def<ReplayFrom>("ReplayFrom", Schema.Union([
-  W.allOf(
-    W.object({
+export const ReplayFrom = Wire.def<ReplayFrom>("ReplayFrom", Schema.Union([
+  Wire.allOf(
+    Wire.object({
       type: Schema.Literal("start")
     }),
     ReplayFromStart
   ),
-  W.not(
-    W.object({
+  Wire.not(
+    Wire.object({
       type: Schema.String,
-      _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+      _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
     }),
-    W.object({
+    Wire.object({
       type: Schema.Literal("start")
     })
   )
@@ -5190,7 +5190,7 @@ export type ResumeSessionRequest = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const ResumeSessionRequest = W.def<ResumeSessionRequest>("ResumeSessionRequest", W.object({
+export const ResumeSessionRequest = Wire.def<ResumeSessionRequest>("ResumeSessionRequest", Wire.object({
   sessionId: SessionId,
   cwd: AbsolutePath,
   additionalDirectories: Schema.optionalKey(Schema.Array(AbsolutePath)),
@@ -5199,7 +5199,7 @@ export const ResumeSessionRequest = W.def<ResumeSessionRequest>("ResumeSessionRe
     ReplayFrom,
     Schema.Null
   ])),
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -5248,31 +5248,31 @@ export type SetSessionConfigOptionRequest = ({
    */
   readonly value: unknown
 }))
-export const SetSessionConfigOptionRequest = W.def<SetSessionConfigOptionRequest>("SetSessionConfigOptionRequest", W.allOf(
-  W.object({
+export const SetSessionConfigOptionRequest = Wire.def<SetSessionConfigOptionRequest>("SetSessionConfigOptionRequest", Wire.allOf(
+  Wire.object({
     sessionId: SessionId,
     configId: SessionConfigId,
-    _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+    _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
   }),
   Schema.Union([
-    W.object({
+    Wire.object({
       value: SessionConfigValueId,
       type: Schema.Literal("id")
     }),
-    W.object({
+    Wire.object({
       value: Schema.Boolean,
       type: Schema.Literal("boolean")
     }),
-    W.not(
-      W.object({
+    Wire.not(
+      Wire.object({
         type: Schema.String,
         value: Schema.Unknown
       }),
       Schema.Union([
-        W.object({
+        Wire.object({
           type: Schema.Literal("id")
         }),
-        W.object({
+        Wire.object({
           type: Schema.Literal("boolean")
         })
       ])
@@ -5295,9 +5295,9 @@ export type ClientRequest = {
   /**
    * Method-specific request parameters.
    */
-  readonly params?: ((InitializeRequest) | (LoginAuthRequest) | (LogoutAuthRequest) | (NewSessionRequest) | (ListSessionsRequest) | (DeleteSessionRequest) | (ResumeSessionRequest) | (CloseSessionRequest) | (SetSessionConfigOptionRequest) | (PromptRequest) | (ExtRequest)) | (null)
+  readonly params?: unknown
 }
-export const ClientRequest = W.def<ClientRequest>("ClientRequest", W.object({
+export const ClientRequest = Wire.def<ClientRequest>("ClientRequest", Wire.object({
   id: RequestId,
   method: Schema.String,
   params: Schema.optionalKey(Schema.Union([
@@ -5321,10 +5321,10 @@ export const ClientRequest = W.def<ClientRequest>("ClientRequest", W.object({
 /**
  * Allowed wire representations for [`ElicitationContentValue`].
  */
-export type ElicitationContentValue = (string) | (number) | (number) | (boolean) | (ReadonlyArray<string>)
-export const ElicitationContentValue = W.def<ElicitationContentValue>("ElicitationContentValue", Schema.Union([
+export type ElicitationContentValue = (string) | (number) | (boolean) | (ReadonlyArray<string>)
+export const ElicitationContentValue = Wire.def<ElicitationContentValue>("ElicitationContentValue", Schema.Union([
   Schema.String,
-  W.integer,
+  Wire.integer,
   Schema.Finite,
   Schema.Boolean,
   Schema.Array(Schema.String)
@@ -5339,8 +5339,8 @@ export type ElicitationAcceptAction = {
    */
   readonly content?: { readonly [key: string]: ElicitationContentValue } | null
 }
-export const ElicitationAcceptAction = W.def<ElicitationAcceptAction>("ElicitationAcceptAction", W.object({
-  content: Schema.optionalKey(Schema.Union([W.record(ElicitationContentValue), Schema.Null]))
+export const ElicitationAcceptAction = Wire.def<ElicitationAcceptAction>("ElicitationAcceptAction", Wire.object({
+  content: Schema.optionalKey(Schema.Union([Wire.record(ElicitationContentValue), Schema.Null]))
 }))
 
 /**
@@ -5373,35 +5373,35 @@ export type CreateElicitationResponse = ({
    */
   readonly action: string
 }))
-export const CreateElicitationResponse = W.def<CreateElicitationResponse>("CreateElicitationResponse", W.allOf(
-  W.object({
-    _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+export const CreateElicitationResponse = Wire.def<CreateElicitationResponse>("CreateElicitationResponse", Wire.allOf(
+  Wire.object({
+    _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
   }),
   Schema.Union([
-    W.allOf(
-      W.object({
+    Wire.allOf(
+      Wire.object({
         action: Schema.Literal("accept")
       }),
       ElicitationAcceptAction
     ),
-    W.object({
+    Wire.object({
       action: Schema.Literal("decline")
     }),
-    W.object({
+    Wire.object({
       action: Schema.Literal("cancel")
     }),
-    W.not(
-      W.object({
+    Wire.not(
+      Wire.object({
         action: Schema.String
       }),
       Schema.Union([
-        W.object({
+        Wire.object({
           action: Schema.Literal("accept")
         }),
-        W.object({
+        Wire.object({
           action: Schema.Literal("decline")
         }),
-        W.object({
+        Wire.object({
           action: Schema.Literal("cancel")
         })
       ])
@@ -5426,9 +5426,9 @@ export type SelectedPermissionOutcome = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const SelectedPermissionOutcome = W.def<SelectedPermissionOutcome>("SelectedPermissionOutcome", W.object({
+export const SelectedPermissionOutcome = Wire.def<SelectedPermissionOutcome>("SelectedPermissionOutcome", Wire.object({
   optionId: PermissionOptionId,
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -5448,25 +5448,25 @@ export type RequestPermissionOutcome = ({
    */
   readonly outcome: string
 })
-export const RequestPermissionOutcome = W.def<RequestPermissionOutcome>("RequestPermissionOutcome", Schema.Union([
-  W.object({
+export const RequestPermissionOutcome = Wire.def<RequestPermissionOutcome>("RequestPermissionOutcome", Schema.Union([
+  Wire.object({
     outcome: Schema.Literal("cancelled")
   }),
-  W.allOf(
-    W.object({
+  Wire.allOf(
+    Wire.object({
       outcome: Schema.Literal("selected")
     }),
     SelectedPermissionOutcome
   ),
-  W.not(
-    W.object({
+  Wire.not(
+    Wire.object({
       outcome: Schema.String
     }),
     Schema.Union([
-      W.object({
+      Wire.object({
         outcome: Schema.Literal("cancelled")
       }),
-      W.object({
+      Wire.object({
         outcome: Schema.Literal("selected")
       })
     ])
@@ -5490,9 +5490,9 @@ export type RequestPermissionResponse = {
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 }
-export const RequestPermissionResponse = W.def<RequestPermissionResponse>("RequestPermissionResponse", W.object({
+export const RequestPermissionResponse = Wire.def<RequestPermissionResponse>("RequestPermissionResponse", Wire.object({
   outcome: RequestPermissionOutcome,
-  _meta: Schema.optionalKey(Schema.Union([W.object({}), Schema.Null]))
+  _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
 }))
 
 /**
@@ -5506,7 +5506,7 @@ export type ClientResponse = ({
   /**
    * Method-specific response data.
    */
-  readonly result: (RequestPermissionResponse) | (CreateElicitationResponse) | (ExtResponse)
+  readonly result: unknown
 }) | ({
   /**
    * The id of the request this response answers.
@@ -5517,8 +5517,8 @@ export type ClientResponse = ({
    */
   readonly error: Error
 })
-export const ClientResponse = W.def<ClientResponse>("ClientResponse", Schema.Union([
-  W.object({
+export const ClientResponse = Wire.def<ClientResponse>("ClientResponse", Schema.Union([
+  Wire.object({
     id: RequestId,
     result: Schema.Union([
       RequestPermissionResponse,
@@ -5526,7 +5526,7 @@ export const ClientResponse = W.def<ClientResponse>("ClientResponse", Schema.Uni
       ExtResponse
     ])
   }),
-  W.object({
+  Wire.object({
     id: RequestId,
     error: Error
   })
@@ -5545,7 +5545,7 @@ export type ProtocolLevelNotification = {
    */
   readonly params?: (CancelRequestNotification) | (null)
 }
-export const ProtocolLevelNotification = W.def<ProtocolLevelNotification>("ProtocolLevelNotification", W.object({
+export const ProtocolLevelNotification = Wire.def<ProtocolLevelNotification>("ProtocolLevelNotification", Wire.object({
   method: Schema.String,
   params: Schema.optionalKey(Schema.Union([
     CancelRequestNotification,

@@ -1,0 +1,7 @@
+{
+  "recommendations": [
+    "typescriptteam.native-preview",
+    "oxc.oxc-vscode",
+    "effectful-tech.effect-vscode"
+  ]
+}

@@ -1,3 +1,4 @@
+import { AcpTransport } from "../../src/AcpTransport.ts"
 /**
  * Ways to reach the fixture agent: in-process over paired in-memory
  * transports, or as a spawned subprocess over stdio.
@@ -11,13 +12,15 @@ import * as Queue from "effect/Queue"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
-import { mkdtempSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
+import * as FileSystem from "effect/FileSystem"
+import * as Path from "effect/Path"
 import * as AcpConnector from "../../src/AcpConnector.ts"
 import * as InMemory from "../../src/transport/InMemory.ts"
 import * as Stdio from "../../src/transport/Stdio.ts"
 import { type AgentOptions, createAgent } from "../fixtures/agent.ts"
+
+const path = Effect.runSync(Effect.provide(Path.Path, Path.layer))
+const join = (...segments: string[]) => path.join(...segments)
 
 export interface Composition {
   readonly name: string
@@ -39,9 +42,10 @@ export const inMemory: Compose = (options) =>
       const agentScope = yield* Scope.make()
       const agentEnd = yield* Scope.provide(pair.right, agentScope)
       const outbox = yield* Queue.unbounded<string>()
+      const runFork = Effect.runForkWith(yield* Effect.context())
       const onLine = createAgent({
         ...options,
-        exit: () => void Effect.runFork(Scope.close(agentScope, Exit.void))
+        exit: () => void runFork(Scope.close(agentScope, Exit.void))
       }, (line) => void Queue.offerUnsafe(outbox, line))
       yield* Stream.fromQueue(outbox).pipe(Stream.runForEach(agentEnd.send), Effect.ignore, Effect.forkIn(agentScope))
       yield* agentEnd.incoming.pipe(
@@ -53,7 +57,7 @@ export const inMemory: Compose = (options) =>
       )
       return yield* pair.left
     })
-    return { name: "in-memory", connector: AcpConnector.layer(connect), released: Deferred.await(released) }
+    return { name: "in-memory", connector: AcpConnector.layer(Layer.effect(AcpTransport, connect)), released: Deferred.await(released) }
   })
 
 const isRunning = (pid: number) => {
@@ -80,11 +84,12 @@ export const stdioCommand = (options: AgentOptions, pidfile: string) =>
   })
 
 export const stdio: Compose = (options) =>
-  Effect.sync(() => {
-    const pidfile = join(mkdtempSync(join(tmpdir(), "acp-agent-")), "pid")
+  Effect.gen(function*() {
+    const fs = yield* FileSystem.FileSystem
+    const pidfile = join(yield* fs.makeTempDirectory({ prefix: "acp-agent-" }), "pid")
     return {
       name: "stdio",
-      connector: Stdio.layer(stdioCommand(options, pidfile)).pipe(Layer.provide(BunServices.layer)),
+      connector: AcpConnector.layer(Stdio.layer(stdioCommand(options, pidfile))).pipe(Layer.provide(BunServices.layer)),
       released: processGone(pidfile)
     }
-  })
+  }).pipe(Effect.provide(BunServices.layer), Effect.orDie)
