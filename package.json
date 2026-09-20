@@ -1,37 +1,37 @@
 {
   "name": "effect-acp",
-  "module": "src/index.ts",
+  "module": "./dist/index.js",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts",
-    "./AcpSchema": "./src/AcpSchema.ts",
-    "./AcpError": "./src/AcpError.ts",
-    "./AcpProtocol": "./src/AcpProtocol.ts",
-    "./AcpTransport": "./src/AcpTransport.ts",
-    "./AcpConnector": "./src/AcpConnector.ts",
-    "./AcpConnection": "./src/AcpConnection.ts",
-    "./AcpApp": "./src/AcpApp.ts",
-    "./AcpSessionError": "./src/AcpSessionError.ts",
-    "./AcpClient": "./src/AcpClient.ts",
-    "./AcpLocalClient": "./src/AcpLocalClient.ts",
-    "./AcpSessionState": "./src/AcpSessionState.ts",
-    "./AcpBridge": "./src/AcpBridge.ts",
-    "./AcpAgent": "./src/AcpAgent.ts",
-    "./agent/Store": "./src/agent/Store.ts",
-    "./agent/Content": "./src/agent/Content.ts",
-    "./protocol/v1": "./src/protocol/v1/Schema.ts",
-    "./protocol/v2": "./src/protocol/v2/Schema.ts",
-    "./transport/InMemory": "./src/transport/InMemory.ts",
-    "./transport/Stdio": "./src/transport/Stdio.ts",
-    "./transport/WebSocket": "./src/transport/WebSocket.ts",
-    "./transport/ProcessStdio": "./src/transport/ProcessStdio.ts",
-    "./server": "./src/server/BridgeHttp.ts",
-    "./AcpHost": "./src/AcpHost.ts",
-    "./AcpGateway": "./src/AcpGateway.ts",
-    "./AcpGatewayClient": "./src/AcpGatewayClient.ts",
-    "./AcpRemoteClient": "./src/AcpRemoteClient.ts",
-    "./server/GatewayHttp": "./src/server/GatewayHttp.ts",
-    "./server/BridgeHttp": "./src/server/BridgeHttp.ts"
+    ".": "./dist/index.js",
+    "./AcpSchema": "./dist/AcpSchema.js",
+    "./AcpError": "./dist/AcpError.js",
+    "./AcpProtocol": "./dist/AcpProtocol.js",
+    "./AcpTransport": "./dist/AcpTransport.js",
+    "./AcpConnector": "./dist/AcpConnector.js",
+    "./AcpConnection": "./dist/AcpConnection.js",
+    "./AcpApp": "./dist/AcpApp.js",
+    "./AcpSessionError": "./dist/AcpSessionError.js",
+    "./AcpClient": "./dist/AcpClient.js",
+    "./AcpLocalClient": "./dist/AcpLocalClient.js",
+    "./AcpSessionState": "./dist/AcpSessionState.js",
+    "./AcpBridge": "./dist/AcpBridge.js",
+    "./AcpAgent": "./dist/AcpAgent.js",
+    "./agent/Store": "./dist/agent/Store.js",
+    "./agent/Content": "./dist/agent/Content.js",
+    "./protocol/v1": "./dist/protocol/v1/Schema.js",
+    "./protocol/v2": "./dist/protocol/v2/Schema.js",
+    "./transport/InMemory": "./dist/transport/InMemory.js",
+    "./transport/Stdio": "./dist/transport/Stdio.js",
+    "./transport/WebSocket": "./dist/transport/WebSocket.js",
+    "./transport/ProcessStdio": "./dist/transport/ProcessStdio.js",
+    "./server": "./dist/server/BridgeHttp.js",
+    "./AcpHost": "./dist/AcpHost.js",
+    "./AcpGateway": "./dist/AcpGateway.js",
+    "./AcpGatewayClient": "./dist/AcpGatewayClient.js",
+    "./AcpRemoteClient": "./dist/AcpRemoteClient.js",
+    "./server/GatewayHttp": "./dist/server/GatewayHttp.js",
+    "./server/BridgeHttp": "./dist/server/BridgeHttp.js"
   },
   "scripts": {
     "prepare": "effect-tsgo patch --typescript --oxlint",
@@ -42,8 +42,10 @@
     "lint:fix": "oxlint --disable-nested-config --deny-warnings --fix .",
     "test": "bun test",
     "check:browser": "bun scripts/check-browser.ts",
-    "check": "bun run generate:check && bun run typecheck && bun run lint && bun run check:docs && bun test && bun run check:browser",
-    "check:docs": "bun scripts/check-docs.ts"
+    "check": "bun run generate:check && bun run typecheck && bun run build && bun run lint && bun run check:docs && bun test && bun run check:browser",
+    "check:docs": "bun scripts/check-docs.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "prepack": "bun run build"
   },
   "devDependencies": {
     "@effect/platform-bun": "4.0.0-rc.115",
@@ -60,5 +62,11 @@
   },
   "dependencies": {
     "effect": "4.0.0-rc.115"
-  }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "src"
+  ]
 }

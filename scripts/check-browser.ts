@@ -50,25 +50,31 @@ await Effect.runPromise(fs.writeFileString(probe, `import "@effect/platform-bun/
 const probed = await Bun.build({ entrypoints: [probe], target: "browser", plugins: [guard] }).then((r) => r.success, () => false)
 if (probed) throw new Error("import guard did not reject a platform import")
 
-for (const [name, target] of Object.entries(pkg.exports)) {
-  const entry = join(dir, `${name.replaceAll(/[^\w]/g, "_") || "root"}.ts`)
-  await Effect.runPromise(fs.writeFileString(entry, `import * as M from ${JSON.stringify(join(root, target))}\nglobalThis.__exports = Object.keys(M)\n`))
-  const result = await Bun.build({ entrypoints: [entry], target: "browser", format: "iife", plugins: [guard] })
-    .catch((error: unknown) => ({ success: false as const, logs: [error], outputs: [] }))
-  if (!result.success) {
-    failed = true
-    Effect.runSync(Effect.logError(`✗ ${name}:`, ...result.logs))
-    continue
+const sourceExports = Object.fromEntries(Object.entries(pkg.exports).map(([name, target]) => [
+  name, target.replace("./dist/", "./src/").replace(/\.js$/, ".ts")
+]))
+for (const [surface, exports] of Object.entries({ source: sourceExports, dist: pkg.exports })) {
+  for (const [name, target] of Object.entries(exports)) {
+    const entry = join(dir, `${surface}_${name.replaceAll(/[^\w]/g, "_") || "root"}.ts`)
+    await Effect.runPromise(fs.writeFileString(entry, `import * as M from ${JSON.stringify(join(root, target))}\nglobalThis.__exports = Object.keys(M)\n`))
+    const result = await Bun.build({ entrypoints: [entry], target: "browser", format: "iife", plugins: [guard] })
+      .catch((error: unknown) => ({ success: false as const, logs: [error], outputs: [] }))
+    if (!result.success) {
+      failed = true
+      Effect.runSync(Effect.logError(`✗ ${surface} ${name}:`, ...result.logs))
+      continue
+    }
+    const context = vm.createContext(sandboxGlobals())
+    try {
+      vm.runInContext(await result.outputs[0]!.text(), context)
+      const exported = await Effect.runPromise(Schema.decodeUnknownEffect(Schema.Array(Schema.String))(context.__exports))
+      Effect.runSync(Effect.log(`✓ ${surface} ${name} (${exported.length} exports)`))
+    } catch (error) {
+      failed = true
+      Effect.runSync(Effect.logError(`✗ ${surface} ${name}: evaluation failed`, error))
+    }
   }
-  const context = vm.createContext(sandboxGlobals())
-  try {
-    vm.runInContext(await result.outputs[0]!.text(), context)
-    const exported = await Effect.runPromise(Schema.decodeUnknownEffect(Schema.Array(Schema.String))(context.__exports))
-    Effect.runSync(Effect.log(`✓ ${name} (${exported.length} exports)`))
-  } catch (error) {
-    failed = true
-    Effect.runSync(Effect.logError(`✗ ${name}: evaluation failed`, error))
-  }
+
 }
 
 await Effect.runPromise(fs.remove(dir, { recursive: true }))

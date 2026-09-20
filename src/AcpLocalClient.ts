@@ -800,7 +800,9 @@ const connect = Effect.fnUntraced(function*(options: ConnectOptions) {
     // matched by id yet; they are collected here instead.
     if (knownSessionId === undefined) pendingNew.add(provisional)
 
-    const outcome = yield* Effect.exit(request(routeKey)).pipe(
+    // The response may reach its waiter before the notification dispatcher has
+    // applied preceding replay chunks. Drain before publishing the snapshot.
+    const outcome = yield* Effect.exit(request(routeKey).pipe(Effect.tap(() => connection.drainNotifications))).pipe(
       Effect.onInterrupt(() => Effect.sync(() => { pendingNew.delete(provisional); routes.delete(routeKey) }))
     )
     if (Exit.isFailure(outcome)) {
@@ -874,9 +876,17 @@ const connect = Effect.fnUntraced(function*(options: ConnectOptions) {
       if (version === 2 && !capabilities.session.resume) return yield* unsupported("session/resume")
       if (sessionOptions.mcpServers?.some((server) => !Capability.mcpServerSupported(capabilities, server))) return yield* unsupported("session/resume", "Unsupported MCP server transport")
       if (sessionOptions.additionalDirectories && !capabilities.session.additionalDirectories) return yield* unsupported("session/resume", "additionalDirectories is not supported")
-      // v2 resumes and replays; v1 can only do so when it advertised
-      // `loadSession`, and `session/resume` where advertised.
-      const operation = version === 2 || capabilities.session.resume ? "session/resume" : "session/load"
+      // v1 resume deliberately omits history. An explicit replay request must
+      // use load even when the agent also advertises resume.
+      if (version === 1 && sessionOptions.replayFrom !== undefined && sessionOptions.replayFrom.type !== "start") {
+        return yield* new AcpHistoryUnavailable({
+          sessionId: sessionOptions.sessionId,
+          operation: "load",
+          detail: "v1 supports full history replay only"
+        })
+      }
+      const operation = version === 2 || (capabilities.session.resume && sessionOptions.replayFrom === undefined)
+        ? "session/resume" : "session/load"
       if (version === 1 && operation === "session/load" && !capabilities.session.loadSession) {
         return yield* new AcpHistoryUnavailable({
           sessionId: sessionOptions.sessionId,

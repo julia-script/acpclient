@@ -210,7 +210,7 @@ export interface NewSessionOptions {
 
 export interface ResumeSessionOptions extends NewSessionOptions {
   readonly sessionId: SessionId
-  /** v2 only: where replay should start. */
+  /** Request history replay. v1 supports only `start`, using `session/load`. */
   readonly replayFrom?: V2.ReplayFrom
 }
 

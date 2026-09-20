@@ -862,3 +862,75 @@ test("v1 outcome includes updates queued before the prompt response", () => run(
   const snapshot = yield* session.snapshot
   expect(snapshot.messages.flatMap((message) => message.content)).toEqual([text("first "), text("last")])
 })))
+
+test("second v1 turn resets idle state and cancellation waits for its prompt response", () => run(Effect.gen(function*() {
+  const { agent, session } = yield* withSession(1)
+  const first = yield* session.submit([text("first")])
+  yield* agent.awaitRequest("session/prompt")
+  yield* completePrompt(agent, 1)
+  yield* first.outcome
+
+  const second = yield* session.submit([text("second")])
+  yield* agent.awaitRequest("session/prompt")
+  expect((yield* session.snapshot).foreground).toEqual({ state: "running", provenance: "inferred" })
+  const cancelling = yield* Effect.forkChild(session.cancel)
+  yield* settle
+  yield* agent.update(session.sessionId, {
+    sessionUpdate: "agent_message_chunk", content: text("Still stopping")
+  })
+  yield* settle
+  expect(cancelling.pollUnsafe()).toBeUndefined()
+  expect((yield* session.snapshot).activeSubmissionId).toBe(second.id)
+
+  yield* agent.respond("session/prompt", { stopReason: "cancelled" })
+  yield* Fiber.join(cancelling)
+  expect((yield* session.snapshot).activeSubmissionId).toBeNull()
+  expect((yield* session.snapshot).foreground).toEqual({ state: "idle", stopReason: "cancelled" })
+})))
+
+describe("explicit history replay", () => {
+  test("v1 replay uses load even when resume is advertised", () => run(Effect.gen(function*() {
+    const { agent, connection } = yield* harness(1, { agent: {
+      version: 1,
+      initialize: { protocolVersion: 1, agentCapabilities: { loadSession: true, sessionCapabilities: { resume: {} } } }
+    } })
+    const loading = yield* Effect.forkChild(connection.resumeSession({ sessionId: "sess-1", cwd: "/work", replayFrom: { type: "start" } }))
+    yield* agent.awaitRequest("session/load")
+    yield* agent.update("sess-1", { sessionUpdate: "user_message_chunk", content: text("old question") })
+    yield* agent.update("sess-1", { sessionUpdate: "agent_message_chunk", content: text("old answer") })
+    yield* agent.respond("session/load", {})
+    const session = yield* Fiber.join(loading)
+    expect((yield* session.snapshot).messages.map(message => message.content)).toEqual([[text("old question")], [text("old answer")]])
+    const next = yield* session.submit([text("next question")])
+    yield* agent.awaitRequest("session/prompt")
+    yield* agent.update("sess-1", { sessionUpdate: "agent_message_chunk", content: text("next answer") })
+    yield* agent.respond("session/prompt", { stopReason: "end_turn" })
+    yield* next.outcome
+    expect((yield* session.snapshot).messages.map(message => message.content)).toEqual([[text("old question")], [text("old answer")], [text("next answer")]])
+    expect((yield* agent.received).filter(message => message.method === "session/resume")).toHaveLength(0)
+  })))
+
+  test("v1 cannot silently omit requested history or downgrade a cursor", () => run(Effect.gen(function*() {
+    const { agent, connection } = yield* harness(1, { agent: {
+      version: 1,
+      initialize: { protocolVersion: 1, agentCapabilities: { sessionCapabilities: { resume: {} } } }
+    } })
+    for (const type of ["start", "_cursor"]) {
+      const result = yield* Effect.exit(connection.resumeSession({ sessionId: "sess-1", cwd: "/work", replayFrom: { type } }))
+      expect(causeOf(result)).toContain("AcpHistoryUnavailable")
+    }
+    expect((yield* agent.received).filter(message => message.method === "session/resume" || message.method === "session/load")).toHaveLength(0)
+  })))
+
+  test("v1 resume without requested history keeps its existing behavior", () => run(Effect.gen(function*() {
+    const { agent, connection } = yield* harness(1, { agent: {
+      version: 1,
+      initialize: { protocolVersion: 1, agentCapabilities: { loadSession: true, sessionCapabilities: { resume: {} } } }
+    } })
+    const resuming = yield* Effect.forkChild(connection.resumeSession({ sessionId: "sess-1", cwd: "/work" }))
+    yield* agent.awaitRequest("session/resume")
+    yield* agent.respond("session/resume", {})
+    yield* Fiber.join(resuming)
+    expect((yield* agent.received).filter(message => message.method === "session/load")).toHaveLength(0)
+  })))
+})

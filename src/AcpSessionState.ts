@@ -504,8 +504,8 @@ const reduceV2Update = (
 /**
  * Applies one decoded v1 `session/update` payload.
  *
- * v1 chunks carry no `messageId`, so consecutive chunks of the same role are
- * folded into one locally identified message and marked `local`. That local
+ * v1 chunks may omit `messageId`, so consecutive anonymous chunks of the same
+ * role and local turn are folded into one message and marked `local`. That local
  * identity is never matched against submissions or agent content.
  */
 const reduceV1Update = (
@@ -521,14 +521,18 @@ const reduceV1Update = (
     case "agent_thought_chunk": {
       const role: MessageKind = messageKind(kind)
       const last = snapshot.messages[snapshot.messages.length - 1]
-      const open = last !== undefined && last.kind === role && last.provenance._tag === "local"
+      // A new prompt is a message boundary even when the agent does not echo
+      // user chunks. This also separates replay's final reply from a new turn.
+      const prefix = `local/${JSON.stringify(snapshot.activeSubmissionId)}/`
+      const open = last !== undefined && last.kind === role && last.provenance._tag === "local" && last.id.startsWith(prefix)
       const block = update["content"]
       if (!Schema.is(V2.ContentBlock)(block)) return snapshot
+      const messageId = typeof update["messageId"] === "string" ? update["messageId"] : null
       return appendChunk(
         snapshot,
-        open ? last.id : `local-${seq}`,
+        messageId ?? (open ? last.id : `${prefix}${seq}`),
         role,
-        localProvenance,
+        messageId === null ? localProvenance : agentProvenance(messageId),
         block,
         seq
       )
@@ -744,8 +748,10 @@ const apply = (
           status: { _tag: "dispatched" },
           requestId: event.requestId
         })),
-        // No agent evidence yet, so the running state is explicitly inferred.
-        foreground: snapshot.foreground.state === "unknown" ? inferredRunning : snapshot.foreground
+        // v1 completes on each prompt response and has no foreground updates.
+        // A later turn must replace the previous turn's idle state, otherwise
+        // any update can release cancellation waiters before this turn ends.
+        foreground: snapshot.version === 1 || snapshot.foreground.state === "unknown" ? inferredRunning : snapshot.foreground
       }
 
     case "submissionAccepted":
@@ -825,4 +831,3 @@ const messageKind = (kind: string): MessageKind => {
   if (kind.startsWith("agent_message")) return "agent"
   return "thought"
 }
-

@@ -13,6 +13,13 @@
 
     // Bundler mode
     "moduleResolution": "bundler",
+    "paths": {
+      "effect-acp": ["./src/index.ts"],
+      "effect-acp/*": ["./src/*.ts"],
+      "effect-acp/protocol/v1": ["./src/protocol/v1/Schema.ts"],
+      "effect-acp/protocol/v2": ["./src/protocol/v2/Schema.ts"],
+      "effect-acp/server": ["./src/server/BridgeHttp.ts"]
+    },
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "noEmit": true,
@@ -29,5 +36,5 @@
     "noUnusedParameters": false,
     "noPropertyAccessFromIndexSignature": false
   },
-  "exclude": ["repos", "node_modules"]
+  "exclude": ["repos", "node_modules", "dist"]
 }

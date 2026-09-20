@@ -581,3 +581,15 @@ test("one huge transcript entry and unlimited chunks cannot bypass the byte budg
   expect(state.truncated.content).toBe(true)
   expect(new TextEncoder().encode(JSON.stringify(state)).byteLength).toBeLessThanOrEqual(2048)
 })
+
+test("v1 replay respects optional agent message IDs", () => {
+  const next = State.reduceAll(v1(), [
+    update({ sessionUpdate: "agent_message_chunk", messageId: "first", content: text("a") }),
+    update({ sessionUpdate: "agent_message_chunk", messageId: "first", content: text("b") }),
+    update({ sessionUpdate: "agent_message_chunk", messageId: "second", content: text("c") })
+  ])
+  expect(next.messages.map(message => ({ id: message.id, content: message.content }))).toEqual([
+    { id: "first", content: [text("a"), text("b")] },
+    { id: "second", content: [text("c")] }
+  ])
+})
