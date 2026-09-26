@@ -1002,23 +1002,33 @@ describe("provisional routing bounds", () => {
       })))
   }
 
-  test("an update after a failed replay response reaches the prior runtime", () =>
-    run(Effect.gen(function*() {
-      const { agent, connection, session } = yield* withSession(2, resumeOptions(2))
-      const resuming = yield* Effect.forkChild(connection.resumeSession({ sessionId: "sess-1", cwd: "/work", replayFrom: { type: "start" } }))
-      yield* agent.awaitRequest("session/resume")
-      const request = (yield* agent.received).find((message) => message.method === "session/resume")!
-      yield* agent.send([
-        { jsonrpc: "2.0", id: request.id, error: { code: -32603, message: "replay failed" } },
-        { jsonrpc: "2.0", method: "session/update", params: {
+  for (const framing of ["batch", "consecutive frames"] as const) {
+    test(`an update after a failed replay response reaches the prior runtime in ${framing}`, () =>
+      run(Effect.gen(function*() {
+        const { agent, connection, session } = yield* withSession(2, resumeOptions(2))
+        const observed = yield* session.observe
+        yield* agent.update("sess-1", { sessionUpdate: "agent_message_chunk", messageId: "history", content: text("history") })
+        yield* Stream.runCollect(Stream.take(Stream.filter(observed.changes, (event) => hasText(event.snapshot, "history")), 1))
+        const resuming = yield* Effect.forkChild(connection.resumeSession({ sessionId: "sess-1", cwd: "/work", replayFrom: { type: "start" } }))
+        yield* agent.awaitRequest("session/resume")
+        yield* agent.update("sess-1", { sessionUpdate: "agent_message_chunk", messageId: "history", content: text("history") })
+        const request = (yield* agent.received).find((message) => message.method === "session/resume")!
+        const response = { jsonrpc: "2.0", id: request.id, error: { code: -32603, message: "replay failed" } }
+        const update = { jsonrpc: "2.0", method: "session/update", params: {
           sessionId: "sess-1", update: { sessionUpdate: "agent_message_chunk", messageId: "after-response", content: text("after-response") }
         } }
-      ])
-      expect(causeOf(yield* Fiber.await(resuming))).toContain("replay failed")
-      yield* until(Effect.map(session.snapshot, (snapshot) => hasText(snapshot, "after-response")))
-      const content = (yield* session.snapshot).messages.flatMap((message) => message.content)
-      expect(content.filter((part) => "text" in part && part.text === "after-response")).toHaveLength(1)
-    })))
+        if (framing === "batch") yield* agent.send([response, update])
+        else {
+          yield* agent.send(response)
+          yield* agent.send(update)
+        }
+        expect(causeOf(yield* Fiber.await(resuming))).toContain("replay failed")
+        yield* until(Effect.map(session.snapshot, (snapshot) => hasText(snapshot, "after-response")))
+        const content = (yield* session.snapshot).messages.flatMap((message) => message.content)
+        expect(content.filter((part) => "text" in part && part.text === "history")).toHaveLength(1)
+        expect(content.filter((part) => "text" in part && part.text === "after-response")).toHaveLength(1)
+      })))
+  }
 
   test("failed replay does not duplicate history evicted from raw updates", () =>
     run(Effect.gen(function*() {
