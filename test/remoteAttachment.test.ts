@@ -149,6 +149,38 @@ test("a stale descriptor is rejected and does not poison a later attachment", ()
   yield* replacement.release
 })))
 
+test("a stale descriptor cannot take over a live controller", () => run(Effect.gen(function*() {
+  const h = yield* hostedHarness(2)
+  const original = yield* h.connection.newSession({ cwd: "/work" })
+  const descriptor = h.remote.descriptor(original)!
+  expect(code(yield* Effect.exit(original.cancel))).toBe("success")
+  expect(code(yield* Effect.exit(h.remote.attach({ ...descriptor, sessionId: "wrong" }, true)))).toBe("Invalid")
+  expect(code(yield* Effect.exit(original.cancel))).toBe("success")
+  yield* original.release
+})))
+
+test("live metadata still blocks stale takeover when retained storage is unavailable", () => run(Effect.gen(function*() {
+  const h = yield* hostedHarness(2)
+  const original = yield* h.connection.newSession({ cwd: "/work" })
+  const descriptor = h.remote.descriptor(original)!
+  yield* original.release
+  let hideRetained = false
+  const storage: GC.Storage = {
+    load: (key) => hideRetained && key.endsWith(`:session:${descriptor.session}`)
+      ? Effect.void
+      : h.storage.load(key),
+    save: h.storage.save,
+    remove: h.storage.remove
+  }
+  const gateway = yield* GC.fromApi(apiFor(h.host), { workspace: "work", storage })
+  const remote = yield* Remote.make(gateway, { profile: "test" })
+  const active = yield* remote.attach(descriptor)
+  hideRetained = true
+  expect(code(yield* Effect.exit(remote.attach({ ...descriptor, version: 1 }, true)))).toBe("Invalid")
+  expect(code(yield* Effect.exit(active.cancel))).toBe("success")
+  yield* active.release
+})))
+
 test("an explicit takeover replaces an active local attachment", () => run(Effect.gen(function*() {
   const h = yield* hostedHarness(2)
   const original = yield* h.connection.newSession({ cwd: "/work" })
