@@ -3,6 +3,7 @@ import { field } from "./support/field.ts"
 import { failure } from "./support/failure.ts"
 import * as Json from "../src/internal/json.ts"
 import { describe, expect, test } from "bun:test"
+import * as Cause from "effect/Cause"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
@@ -293,6 +294,46 @@ describe("cancellation, deadlines, capacity, and termination", () => {
       yield* peer.send({ jsonrpc: "2.0", method: "$/cancel_request", params: { requestId: 4 } })
       expect(yield* peer.next).toEqual({ jsonrpc: "2.0", id: 4, error: { code: -32800, message: "Request cancelled" } })
       yield* Deferred.await(interrupted)
+    })))
+
+  test("an interrupted handler answers once while the connection remains live", () =>
+    run(Effect.gen(function*() {
+      const started = yield* Deferred.make<void>()
+      const { peer } = yield* harness({ handlers: { request: (_method, _params, { id }) =>
+        id === 1 ? Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.interrupt)) : Effect.succeed({ ok: true })
+      } })
+      yield* peer.send({ jsonrpc: "2.0", id: 1, method: "interrupt" })
+      yield* Deferred.await(started)
+      expect(yield* peer.next).toMatchObject({ id: 1, error: { code: -32800 } })
+      yield* peer.send({ jsonrpc: "2.0", id: 2, method: "healthy" })
+      expect(yield* peer.next).toMatchObject({ id: 2, result: { ok: true } })
+      expect(peer.received.map((frame) => JSON.parse(frame)).filter((frame) => frame.id === 1)).toHaveLength(1)
+    })))
+
+  test("a defect combined with interruption is an Internal error", () =>
+    run(Effect.gen(function*() {
+      const { peer } = yield* harness({ handlers: { request: () => Effect.failCause(Cause.fromReasons([
+        Cause.makeInterruptReason(0), Cause.makeDieReason(new Error("private defect"))
+      ])) } })
+      yield* peer.send({ jsonrpc: "2.0", id: 1, method: "broken" })
+      expect(yield* peer.next).toEqual({ jsonrpc: "2.0", id: 1, error: { code: -32603, message: "Internal error" } })
+    })))
+
+  test("an interrupted batch member retains the other response", () =>
+    run(Effect.gen(function*() {
+      const { peer } = yield* harness({ handlers: { request: (_method, _params, { id }) =>
+        id === 1 ? Effect.interrupt : Effect.succeed({ ok: true })
+      } })
+      yield* peer.send([
+        { jsonrpc: "2.0", id: 1, method: "interrupt" },
+        { jsonrpc: "2.0", id: 2, method: "healthy" }
+      ])
+      const response = yield* peer.next
+      expect(Array.isArray(response) ? response : []).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: 1, error: expect.objectContaining({ code: -32800 }) }),
+        expect.objectContaining({ id: 2, result: { ok: true } })
+      ]))
+      expect(Array.isArray(response) ? response : []).toHaveLength(2)
     })))
 
   test("a deadline fails locally without fabricating remote cancellation", () =>

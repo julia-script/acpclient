@@ -732,7 +732,7 @@ const connect = Effect.fnUntraced(function*(options: ConnectOptions) {
         const owned = sessionScopes.get(sessionId)
         sessionScopes.delete(sessionId)
         return owned === undefined ? Effect.void : Effect.andThen(
-          resuming ? cancelPendingInteractions(runtime) : Effect.void,
+          cancelPendingInteractions(runtime),
           Scope.close(owned, Exit.void)
         )
       })),

@@ -390,6 +390,7 @@ export const make = <R = never>(options: Options<R>): AcpAgent<R> => {
         Effect.suspend(() => {
           const state = sessions.get(sessionId)
           if (!state) return Effect.void
+          state.cancelled = true
           sessions.delete(sessionId)
           return Scope.close(state.scope, Exit.void).pipe(Effect.ignore)
         })

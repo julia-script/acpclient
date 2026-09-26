@@ -19,11 +19,14 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
+import * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import type { AcpAgentConnection, AcpSession, ConnectOptions } from "../src/AcpClient.ts"
 import { type OperationError, type ConnectError, AcpClient } from "../src/AcpClient.ts"
 import * as AcpLocalClient from "../src/AcpLocalClient.ts"
+import * as V1 from "../src/protocol/v1/Schema.ts"
+import * as V2 from "../src/protocol/v2/Schema.ts"
 import { type ScriptedAgent, scriptedAgent } from "./support/sessionAgent.ts"
 
 const run = <A, E>(effect: Effect.Effect<A, E, Scope.Scope>) => Effect.runPromise(Effect.scoped(effect))
@@ -1094,6 +1097,42 @@ describe("provisional routing bounds", () => {
       })
       expect(yield* agent.awaitReply("released-permission")).toMatchObject({ error: { code: -32602 } })
     })))
+
+  for (const version of [1, 2] as const) {
+    for (const kind of ["permission", "elicitation"] as const) {
+      test(`v${version} ordinary release answers a pending ${kind} with cancellation`, () =>
+        run(Effect.gen(function*() {
+          const { agent, session } = yield* withSession(version)
+          const observed = yield* session.observe
+          const id = `release-${kind}`
+          yield* agent.send({
+            jsonrpc: "2.0", id,
+            method: kind === "permission" ? "session/request_permission" : "elicitation/create",
+            params: kind === "permission"
+              ? { sessionId: "sess-1", title: "Edit file",
+                ...(version === 1 ? { toolCall: { toolCallId: "t-1", title: "Edit file" } } : {}),
+                options: [{ optionId: "allow", name: "Allow", kind: "allow_once" }] }
+              : { sessionId: "sess-1", message: "Continue?", mode: "form",
+                requestedSchema: { type: "object", properties: { answer: { type: "string" } } } }
+          })
+          yield* Stream.runCollect(Stream.take(Stream.filter(observed.changes, (event) =>
+            Object.values(event.snapshot.interactions).some((interaction) => interaction.status === "pending")
+          ), 1))
+          yield* session.release
+          const reply = yield* agent.awaitReply(id)
+          expect(reply).toMatchObject(kind === "permission"
+            ? { result: { outcome: { outcome: "cancelled" } } }
+            : { result: { action: "cancel" } })
+          if (kind === "permission") {
+            if (version === 1) yield* Schema.decodeUnknownEffect(V1.RequestPermissionResponse)(reply["result"])
+            else yield* Schema.decodeUnknownEffect(V2.RequestPermissionResponse)(reply["result"])
+          } else {
+            if (version === 1) yield* Schema.decodeUnknownEffect(V1.CreateElicitationResponse)(reply["result"])
+            else yield* Schema.decodeUnknownEffect(V2.CreateElicitationResponse)(reply["result"])
+          }
+        })))
+    }
+  }
 
   for (const version of [1, 2] as const) {
     test(`v${version} permission admitted during resume receives a response after promotion`, () =>

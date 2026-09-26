@@ -16,6 +16,7 @@ import * as Deferred from "effect/Deferred"
 import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as Fiber from "effect/Fiber"
 import * as FiberSet from "effect/FiberSet"
 import * as Queue from "effect/Queue"
 import * as Schema from "effect/Schema"
@@ -345,14 +346,26 @@ export const make = Effect.fnUntraced(function*(options: Options = {}) {
         Effect.catchTag("SchemaError", (error) => Effect.logError(`Handler for ${method} returned non-serializable data`, error).pipe(
           Effect.as(JsonRpc.failure(id, ErrorCode.InternalError, "Internal error"))
         ))
-      )),
-      Effect.catchCauseIf((cause) => !Cause.hasInterruptsOnly(cause), (cause) => Effect.logError(`Handler for ${method} failed`, cause).pipe(
-          Effect.as(JsonRpc.failure(id, ErrorCode.InternalError, "Internal error"))
-        )
-      )
+      ))
     )
+    // A handler can terminate with interruption without closing the
+    // connection. Observe its exit as a value so the response fiber survives.
+    const completed = Effect.gen(function*() {
+      const fiber = yield* Effect.forkChild(handle, { startImmediately: true })
+      return yield* Fiber.await(fiber).pipe(
+        Effect.flatMap((exit) => {
+          if (Exit.isSuccess(exit)) return Effect.succeed(exit.value)
+          if (Cause.hasInterruptsOnly(exit.cause)) {
+            return Effect.succeed(JsonRpc.failure(id, ErrorCode.RequestCancelled, "Request cancelled"))
+          }
+          return Effect.as(Effect.logError(`Handler for ${method} failed`, exit.cause),
+            JsonRpc.failure(id, ErrorCode.InternalError, "Internal error"))
+        }),
+        Effect.ensuring(Effect.asVoid(Effect.forkDetach(Fiber.interrupt(fiber))))
+      )
+    })
     return Effect.raceFirst(
-      handle,
+      completed,
       Effect.as(Deferred.await(cancelled), JsonRpc.failure(id, ErrorCode.RequestCancelled, "Request cancelled"))
     ).pipe(Effect.ensuring(Effect.sync(() => active.delete(id))))
   }
