@@ -174,7 +174,9 @@ const program = Effect.gen(function*() {
   }))
 })
 
-BunRuntime.runMain(program.pipe(Effect.provide(Socket.layerWebSocketConstructorGlobal)))
+if (import.meta.main) {
+  BunRuntime.runMain(program.pipe(Effect.provide(Socket.layerWebSocketConstructorGlobal)))
+}
 ```
 
 The program opens one session, finishes a prompt, closes the first socket, and attaches through a second socket. With this echo agent, it prints:

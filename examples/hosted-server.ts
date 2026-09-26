@@ -1,7 +1,9 @@
 import * as AcpConnector from "effect-acp/AcpConnector"
 /** Runnable hosted recovery example: bun examples/hosted-server.ts */
 import * as BunHttpServer from "@effect/platform-bun/BunHttpServer"
+import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
+import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as HttpRouter from "effect/unstable/http/HttpRouter"
@@ -17,6 +19,10 @@ import { exerciseRecovery } from "./hosted-client.ts"
 
 const port = 8318
 let initialized = 0
+class UnexpectedInitialization extends Data.TaggedError("UnexpectedInitialization")<{
+  readonly actual: number
+}> {}
+
 const host = Host.layer({
   policy: { retentionMs: 30_000, interactionMs: 20_000, shutdownMs: 500, retryMs: 60_000,
     events: 256, eventBytes: 4_194_304, subscriberCapacity: 64, transcriptBytes: 1_048_576,
@@ -39,8 +45,13 @@ const route = GatewayHttp.route({
 const server = HttpRouter.serve(HttpRouter.addAll([route]), { disableLogger: true }).pipe(
   Layer.provide(host), Layer.provide(BunServices.layer), Layer.provide(BunHttpServer.layer({ port })))
 const program = exerciseRecovery(`ws://localhost:${port}/acp/gateway?token=demo`).pipe(
-  Effect.tap(() => Effect.sync(() => {
-    if (initialized !== 1) throw new Error(`Expected one ACP initialization, got ${initialized}`)
+  Effect.flatMap(() => initialized === 1
+    ? Effect.void
+    : Effect.fail(new UnexpectedInitialization({ actual: initialized }))),
+  Effect.tap(() => Effect.log("hosted recovery: permission and streaming restored; one ACP initialization")),
+  Effect.provide(Layer.merge(server, Socket.layerWebSocketConstructorGlobal))
+)
 
-  })), Effect.tap(() => Effect.log("hosted recovery: permission and streaming restored; one ACP initialization")), Effect.provide(Layer.merge(server, Socket.layerWebSocketConstructorGlobal)))
-Effect.runPromise(Effect.scoped(program).pipe(Effect.timeout("15 seconds"))).catch((error) => { Effect.runSync(Effect.logError(error)); process.exitCode = 1 })
+if (import.meta.main) {
+  BunRuntime.runMain(Effect.scoped(program).pipe(Effect.timeout("15 seconds")))
+}

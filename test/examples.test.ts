@@ -10,6 +10,24 @@ const root = join(import.meta.dir, "..")
 const runExample = (file: string, args: ReadonlyArray<string> = []) =>
   Bun.spawnSync(["bun", join(root, "examples", file), ...args], { cwd: root, timeout: 20_000 })
 
+test("executable examples can be imported without starting their runtime", () => {
+  for (const file of [
+    "../examples/echo-agent.ts",
+    "../examples/custom-transport.ts",
+    "../examples/hosted-server.ts",
+    "../docs/examples/first-session.ts",
+    "../docs/examples/hosted-reconnect.ts"
+  ]) {
+    const url = new URL(file, import.meta.url)
+    const result = Bun.spawnSync(["bun", "-e", `await import(${JSON.stringify(url.href)}); console.log("imported")`], {
+      cwd: root,
+      timeout: 5_000
+    })
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout.toString().trim()).toBe("imported")
+  }
+}, 20_000)
+
 test("bridge example resolves only own launch profiles", () => {
   const command = { name: "demo" }
   const profiles = { demo: command }
