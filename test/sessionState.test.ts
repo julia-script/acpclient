@@ -367,6 +367,26 @@ describe("submissions", () => {
     expect(next.foreground).toEqual({ state: "idle", stopReason: "end_turn" })
   })
 
+  test("a new turn replaces inherited idle but keeps an idle update before dispatch", () => {
+    const previousIdle = State.reduce(v2(), update({ sessionUpdate: "state_update", state: "idle", stopReason: "end_turn" }))
+    const registered = State.reduce(previousIdle, { _tag: "submissionRegistered", submission: submission("s-2") })
+    expect(registered.foreground).toEqual({ state: "running", provenance: "inferred" })
+
+    const earlyIdle = State.reduce(registered, update({ sessionUpdate: "state_update", state: "idle", stopReason: "end_turn" }))
+    const dispatched = State.reduce(earlyIdle, { _tag: "submissionDispatched", id: "s-2", requestId: 2 })
+    expect(dispatched.foreground).toEqual({ state: "idle", stopReason: "end_turn" })
+    expect(dispatched.activeSubmissionId).toBeNull()
+  })
+
+  test("dispatch preserves an agent-reported foreground state", () => {
+    const next = State.reduceAll(v2(), [
+      { _tag: "submissionRegistered", submission: submission("s-1") },
+      update({ sessionUpdate: "state_update", state: "queued" }),
+      { _tag: "submissionDispatched", id: "s-1", requestId: 1 }
+    ])
+    expect(next.foreground).toEqual({ state: "queued", provenance: "agent-reported" })
+  })
+
   test("agent-reported running is distinguishable from inferred running", () => {
     // v1 has no `state_update` variant at all, so a running v1 session is
     // only ever locally inferred from an outstanding prompt.

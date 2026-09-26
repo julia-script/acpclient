@@ -517,6 +517,62 @@ sessionContract(2)
 // -----------------------------------------------------------------------------
 
 describe("v2 acceptance and completion are separate", () => {
+  test("a second turn stays busy after a chunk until its own idle update", () =>
+    run(Effect.gen(function*() {
+      const { agent, session } = yield* withSession(2)
+      const first = yield* session.submit([text("one")])
+      yield* agent.awaitRequest("session/prompt")
+      yield* completePrompt(agent, 2)
+      yield* first.outcome
+
+      const second = yield* session.submit([text("two")])
+      yield* agent.awaitRequest("session/prompt")
+      const observed = yield* session.observe
+      const chunk = yield* Effect.forkChild(Stream.runCollect(Stream.take(Stream.filter(
+        observed.changes,
+        (event) => event.snapshot.messages.some((message) => message.id === "m-2" && message.content.length > 0)
+      ), 1)))
+      yield* agent.update("sess-1", { sessionUpdate: "agent_message_chunk", messageId: "m-2", content: text("working") })
+      yield* Fiber.join(chunk)
+      yield* agent.respond("session/prompt", { messageId: "m-2" })
+      yield* second.accepted
+
+      const outcome = yield* Effect.forkChild(second.outcome)
+      const cancelArrived = yield* Effect.forkChild(agent.awaitRequest("session/cancel"))
+      const cancelling = yield* Effect.forkChild(session.cancel)
+      yield* Fiber.join(cancelArrived)
+      expect(outcome.pollUnsafe()).toBeUndefined()
+      expect(cancelling.pollUnsafe()).toBeUndefined()
+      expect((yield* session.snapshot).activeSubmissionId).toBe(second.id)
+      expect(causeOf(yield* Effect.exit(session.submit([text("three")])))).toContain("AcpSessionBusy")
+      expect((yield* agent.received).filter((message) => message.method === "session/prompt")).toHaveLength(2)
+
+      yield* agent.update("sess-1", { sessionUpdate: "state_update", state: "idle", stopReason: "end_turn" })
+      expect((yield* Fiber.join(outcome)).status).toEqual({ _tag: "completed" })
+      expect(yield* Fiber.join(cancelling)).toBeUndefined()
+    })))
+
+  test("an idle update before the v2 prompt response still completes the turn", () =>
+    run(Effect.gen(function*() {
+      const { agent, session } = yield* withSession(2)
+      const first = yield* session.submit([text("one")])
+      yield* agent.awaitRequest("session/prompt")
+      yield* completePrompt(agent, 2)
+      yield* first.outcome
+
+      const submission = yield* session.submit([text("two")])
+      yield* agent.awaitRequest("session/prompt")
+      const observed = yield* session.observe
+      const idle = yield* Effect.forkChild(Stream.runCollect(Stream.take(Stream.filter(
+        observed.changes,
+        (event) => event.snapshot.foreground.state === "idle"
+      ), 1)))
+      yield* agent.update("sess-1", { sessionUpdate: "state_update", state: "idle", stopReason: "end_turn" })
+      yield* Fiber.join(idle)
+      yield* agent.respond("session/prompt", { messageId: "m-1" })
+      expect((yield* submission.outcome).status).toEqual({ _tag: "completed" })
+    })))
+
   // Spec: "User update precedes acknowledgement".
   test("acceptance carries the agent message id and does not end foreground work", () =>
     run(Effect.gen(function*() {

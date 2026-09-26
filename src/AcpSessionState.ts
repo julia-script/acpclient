@@ -738,7 +738,11 @@ const apply = (
       return {
         ...snapshot,
         submissions: { ...snapshot.submissions, [event.submission.id]: event.submission },
-        activeSubmissionId: event.submission.id
+        activeSubmissionId: event.submission.id,
+        // The previous turn's idle is no longer evidence that this turn has
+        // finished. Reset it before the wire write so a new idle update that
+        // arrives before dispatch or acceptance is still observed.
+        foreground: snapshot.foreground.state === "idle" ? inferredRunning : snapshot.foreground
       }
 
     case "submissionDispatched":

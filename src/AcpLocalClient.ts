@@ -196,7 +196,8 @@ const makeRuntime = Effect.fnUntraced(function*(
       Effect.suspend(() => {
         const before = snapshot
         snapshot = State.reduce(before, event, limits)
-        const releasedIdle = snapshot.foreground.state === "idle" || (before.activeSubmissionId !== null && snapshot.activeSubmissionId === null)
+        const releasedIdle = (before.foreground.state !== "idle" && snapshot.foreground.state === "idle") ||
+          (before.activeSubmissionId !== null && snapshot.activeSubmissionId === null)
         const waiters = releasedIdle ? idleWaiters : []
         if (releasedIdle) idleWaiters = []
         return publish(snapshot).pipe(
