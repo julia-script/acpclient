@@ -68,7 +68,7 @@ export type Version = 1 | 2
 /**
  * An agent's advertised capabilities do not match its installed handlers.
  *
- * Raised by {@link make} before anything is served, so a misconfigured agent
+ * Returned by {@link make} before anything is served, so a misconfigured agent
  * never accepts a connection it cannot honor.
  */
 export class AcpAgentConfigError extends Data.TaggedError("AcpAgentConfigError")<{ readonly missing: string; readonly message: string }> {
@@ -300,7 +300,7 @@ export interface AcpAgent<R = never> {
  * The capability set this agent advertises for `version`.
  *
  * Only surfaces with an installed handler are advertised, so the wire never
- * promises more than {@link make} validated.
+ * promises more than construction validated.
  */
 const advertisement = <R>(options: Options<R>, version: Version): V1.InitializeResponse | V2.InitializeResponse => {
   const methods = options.auth?.methods ?? []
@@ -365,15 +365,26 @@ interface SessionState {
 
 /**
  * Builds an agent from handlers, validating that everything it would
- * advertise is actually installed.
- *
- * Fails synchronously (by throwing `AcpAgentConfigError`) rather than at the
- * first connection: a capability surface the agent cannot honor is a
- * programming error, not a runtime condition.
+ * advertise is actually installed. Configuration failures are typed; other
+ * construction defects remain defects.
  */
-export const make = <R = never>(options: Options<R>): AcpAgent<R> => {
+export const make = <R = never>(options: Options<R>): Effect.Effect<AcpAgent<R>, AcpAgentConfigError> =>
+  Effect.suspend(() => {
+    const invalid = validate(options)
+    return invalid ? Effect.fail(invalid) : Effect.sync(() => build(options))
+  })
+
+/**
+ * Builds an agent synchronously. Use this when the configuration is known to
+ * be valid; an invalid configuration throws `AcpAgentConfigError`.
+ */
+export const makeUnsafe = <R = never>(options: Options<R>): AcpAgent<R> => {
   const invalid = validate(options)
   if (invalid) throw invalid
+  return build(options)
+}
+
+const build = <R>(options: Options<R>): AcpAgent<R> => {
   const enabled: ReadonlyArray<Version> = options.versions ?? [1]
 
   const serve = Effect.gen(function*() {

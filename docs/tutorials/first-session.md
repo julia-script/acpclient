@@ -52,7 +52,7 @@ export const agent = AcpAgent.make({
 })
 
 if (import.meta.main) {
-  BunRuntime.runMain(Effect.scoped(AcpAgent.serveStdio(agent)).pipe(
+  BunRuntime.runMain(Effect.scoped(Effect.flatMap(agent, AcpAgent.serveStdio)).pipe(
     Effect.provide(Layer.mergeAll(Store.layer, BunServices.layer))
   ))
 }

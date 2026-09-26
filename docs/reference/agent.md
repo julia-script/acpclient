@@ -4,7 +4,9 @@ Scope: `AcpAgent`, `agent/Content`, and `agent/Store`. These APIs serve an agent
 
 ## Construction and serving
 
-`AcpAgent.make(options)` constructs an agent while preserving handler Effect environment requirements. Invalid handler/capability configuration throws `AcpAgentConfigError` at construction time.
+`AcpAgent.make(options)` returns an Effect that constructs the agent, preserving handler Effect environment requirements. Invalid handler/capability configuration fails with the typed `AcpAgentConfigError` before serving. `AcpAgent.makeUnsafe(options)` constructs synchronously and throws that error for invalid configuration; use it only when the configuration is known to be valid.
+
+Migration: move `const agent = AcpAgent.make(options)` into an Effect as `const agent = yield* AcpAgent.make(options)`, then serve the result. For a deliberately synchronous startup path, replace the old call with `AcpAgent.makeUnsafe(options)`.
 
 | Option | Contract/default |
 | --- | --- |

@@ -30,7 +30,7 @@ For v2 structured questions, use `client.elicit` with a mode the client advertis
 
 Put tool resources in scopes and attach finalizers where they are acquired. Session cancellation interrupts the owned execution and lets finalizers finish before reporting completion. Avoid converting interruption into success or retrying it as a failed model request.
 
-Map expected domain failures to `AcpAgentError`; the `unknownSession` and `authRequired` helpers cover common protocol conditions. Construction errors are separate: `AcpAgent.make` throws `AcpAgentConfigError` for an inconsistent handler/capability configuration. A turn execution failure is logged generically and completed as a refusal; defects in request handling become an internal-error response without their internal cause.
+Map expected domain failures to `AcpAgentError`; the `unknownSession` and `authRequired` helpers cover common protocol conditions. Construction errors are separate: `AcpAgent.make` returns a typed `AcpAgentConfigError` failure for an inconsistent handler/capability configuration. Run that construction Effect before serving, as the echo example does. `makeUnsafe` is available for known-valid static configurations and throws on invalid configuration. A turn execution failure is logged generically and completed as a refusal; defects in request handling become an internal-error response without their internal cause.
 
 ## Add persistence and capabilities deliberately
 

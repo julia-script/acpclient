@@ -60,7 +60,7 @@ const agent = AcpAgent.make({
 
 // The author supplies storage and process I/O; the agent supplies the protocol.
 Effect.runFork(
-  Effect.scoped(AcpAgent.serveStdio(agent)).pipe(
+  Effect.scoped(Effect.flatMap(agent, AcpAgent.serveStdio)).pipe(
     Effect.provide(Layer.mergeAll(Store.layer, BunServices.layer))
   )
 )
