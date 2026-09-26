@@ -74,6 +74,8 @@ for (const version of [1, 2] as const) {
 }
 
 const text = (value: string) => ({ type: "text" as const, text: value })
+const hasText = (session: { readonly messages: ReadonlyArray<{ readonly content: ReadonlyArray<{ readonly type: string }> }> }, value: string) =>
+  session.messages.some((message) => message.content.some((part) => part.type === "text" && "text" in part && part.text === value))
 
 /** Lets forked fibers and the transport make progress. */
 const settle = Effect.repeat(Effect.yieldNow, { times: 40 })
@@ -105,6 +107,55 @@ const completePrompt = (agent: ScriptedAgent, version: 1 | 2, sessionId = "sess-
       yield* agent.update(sessionId, { sessionUpdate: "state_update", state: "idle", stopReason: "end_turn" })
     }
     yield* settle
+  })
+
+const resumeOptions = (version: 1 | 2): Parameters<typeof harness>[1] => version === 2
+  ? { agent: { version, initialize: {
+    protocolVersion: 2,
+    info: { name: "scripted-agent", version: "1.0.0" },
+    capabilities: { session: { resume: {}, prompt: { image: {} } } }
+  } } }
+  : {}
+
+/** A live route must still accept updates and permission requests. */
+const expectLiveRoute = (agent: ScriptedAgent, session: AcpSession, version: 1 | 2, suffix: string) =>
+  Effect.gen(function*() {
+    const id = `permission-${suffix}`
+    const observed = yield* session.observe
+    yield* agent.update("sess-1", {
+      sessionUpdate: "agent_message_chunk",
+      ...(version === 2 ? { messageId: `update-${suffix}` } : {}),
+      content: text(suffix)
+    })
+    yield* agent.send({
+      jsonrpc: "2.0",
+      id,
+      method: "session/request_permission",
+      params: {
+        sessionId: "sess-1",
+        title: "Edit file",
+        ...(version === 1 ? { toolCall: { toolCallId: "t-1", title: "Edit file" } } : {}),
+        options: [{ optionId: "allow", name: "Allow", kind: "allow_once" }]
+      }
+    })
+    const first = yield* Effect.raceFirst(
+      Stream.runCollect(Stream.take(Stream.filter(observed.changes, (event) =>
+        Object.values(event.snapshot.interactions).some((interaction) => interaction.status === "pending")
+      ), 1)).pipe(Effect.as("pending" as const)),
+      agent.awaitReply(id).pipe(Effect.as("rejected" as const))
+    )
+    expect(first).toBe("pending")
+    const after = yield* session.observe
+    if (!hasText(after.snapshot, suffix)) {
+      yield* Stream.runCollect(Stream.take(Stream.filter(after.changes, (event) =>
+        hasText(event.snapshot, suffix)
+      ), 1))
+    }
+    const snapshot = yield* session.snapshot
+    expect(hasText(snapshot, suffix)).toBe(true)
+    const interaction = Object.values(snapshot.interactions).find((value) => value.status === "pending")!
+    yield* session.resolveInteraction(interaction.interactionId, { _tag: "selected", optionId: "allow" })
+    expect(yield* agent.awaitReply(id)).toMatchObject({ result: { outcome: { outcome: "selected", optionId: "allow" } } })
   })
 
 // -----------------------------------------------------------------------------
@@ -842,6 +893,98 @@ describe("provisional routing bounds", () => {
       // Silently losing required deltas is exactly what the bound forbids.
       const exit = yield* Fiber.await(opening)
       expect(causeOf(exit)).toContain("AcpProvisionalOverflow")
+    })))
+
+  test("overflowed new sessions leave no route under the returned session id", () =>
+    run(Effect.gen(function*() {
+      const { agent, connection } = yield* harness(2, {
+        agent: { version: 2, holdNewSession: true },
+        connect: { provisional: { updates: 2 } }
+      })
+      const first = yield* Effect.forkChild(connection.newSession({ cwd: "/work" }))
+      yield* agent.awaitRequest("session/new")
+      for (let index = 0; index < 3; index++) {
+        yield* agent.update("sess-1", { sessionUpdate: "agent_message_chunk", messageId: `overflow-${index}`, content: text(String(index)) })
+      }
+      yield* agent.releaseNewSession({ sessionId: "sess-1" })
+      expect(causeOf(yield* Fiber.await(first))).toContain("AcpProvisionalOverflow")
+
+      const second = yield* Effect.forkChild(connection.newSession({ cwd: "/work" }))
+      yield* agent.awaitRequest("session/new")
+      yield* agent.update("sess-1", { sessionUpdate: "agent_message_chunk", messageId: "fresh", content: text("fresh") })
+      yield* agent.releaseNewSession({ sessionId: "sess-1" })
+      const session = yield* Fiber.join(second)
+      expect(hasText(yield* session.snapshot, "fresh")).toBe(true)
+    })))
+
+  for (const version of [1, 2] as const) {
+    test(`v${version} failed resume keeps the prior route and live events`, () =>
+      run(Effect.gen(function*() {
+        const { agent, connection, session } = yield* withSession(version, resumeOptions(version))
+        const resuming = yield* Effect.forkChild(connection.resumeSession({ sessionId: "sess-1", cwd: "/work" }))
+        yield* agent.awaitRequest("session/resume")
+        yield* expectLiveRoute(agent, session, version, `during-resume-v${version}`)
+        yield* agent.update("sess-1", { sessionUpdate: "agent_message_chunk", ...(version === 2 ? { messageId: "during-failure" } : {}), content: text("during-failure") })
+        yield* agent.respondError("session/resume", -32603, "resume failed")
+        expect(causeOf(yield* Fiber.await(resuming))).toContain("resume failed")
+        yield* expectLiveRoute(agent, session, version, `after-failure-v${version}`)
+        const snapshot = yield* session.snapshot
+        expect(snapshot.messages.flatMap((message) => message.content).filter((part) => "text" in part && part.text === "during-failure")).toHaveLength(1)
+      })))
+
+    test(`v${version} interrupted resume restores the prior route`, () =>
+      run(Effect.gen(function*() {
+        const { agent, connection, session } = yield* withSession(version, resumeOptions(version))
+        const resuming = yield* Effect.forkChild(connection.resumeSession({ sessionId: "sess-1", cwd: "/work" }))
+        yield* agent.awaitRequest("session/resume")
+        yield* Fiber.interrupt(resuming)
+        yield* expectLiveRoute(agent, session, version, `after-interrupt-v${version}`)
+      })))
+
+    test(`v${version} resume overflow preserves an eligible prior route`, () =>
+      run(Effect.gen(function*() {
+        const { agent, connection, session } = yield* withSession(version, {
+          ...resumeOptions(version), connect: { provisional: { updates: 2 } }
+        })
+        const resuming = yield* Effect.forkChild(connection.resumeSession({ sessionId: "sess-1", cwd: "/work" }))
+        yield* agent.awaitRequest("session/resume")
+        for (let index = 0; index < 3; index++) {
+          yield* agent.update("sess-1", { sessionUpdate: "agent_message_chunk", ...(version === 2 ? { messageId: `replay-${index}` } : {}), content: text(`replay-${index}`) })
+        }
+        yield* agent.respond("session/resume", {})
+        expect(causeOf(yield* Fiber.await(resuming))).toContain("AcpProvisionalOverflow")
+        yield* expectLiveRoute(agent, session, version, `after-overflow-v${version}`)
+        const snapshot = yield* session.snapshot
+        for (let index = 0; index < 3; index++) expect(hasText(snapshot, `replay-${index}`)).toBe(true)
+      })))
+
+    test(`v${version} successful resume owns its route after the old handle releases`, () =>
+      run(Effect.gen(function*() {
+        const { agent, connection, session: previous } = yield* withSession(version, resumeOptions(version))
+        const resuming = yield* Effect.forkChild(connection.resumeSession({ sessionId: "sess-1", cwd: "/work" }))
+        yield* agent.awaitRequest("session/resume")
+        yield* agent.update("sess-1", { sessionUpdate: "agent_message_chunk", ...(version === 2 ? { messageId: "resume-replay" } : {}), content: text("resume-replay") })
+        yield* agent.respond("session/resume", {})
+        const current = yield* Fiber.join(resuming)
+        expect(hasText(yield* current.snapshot, "resume-replay")).toBe(true)
+        yield* previous.release
+        yield* expectLiveRoute(agent, current, version, `after-success-v${version}`)
+      })))
+  }
+
+  test("releasing the prior session during resume prevents route restoration", () =>
+    run(Effect.gen(function*() {
+      const { agent, connection, session } = yield* withSession(2, resumeOptions(2))
+      const resuming = yield* Effect.forkChild(connection.resumeSession({ sessionId: "sess-1", cwd: "/work" }))
+      yield* agent.awaitRequest("session/resume")
+      yield* session.release
+      yield* agent.respondError("session/resume", -32603, "resume failed")
+      expect(causeOf(yield* Fiber.await(resuming))).toContain("resume failed")
+      yield* agent.send({
+        jsonrpc: "2.0", id: "released-permission", method: "session/request_permission",
+        params: { sessionId: "sess-1", title: "Edit file", options: [{ optionId: "allow", name: "Allow", kind: "allow_once" }] }
+      })
+      expect(yield* agent.awaitReply("released-permission")).toMatchObject({ error: { code: -32602 } })
     })))
 })
 

@@ -44,6 +44,8 @@ export interface ScriptedAgent {
   readonly respondError: (method: string, code: number, message: string) => Effect.Effect<void, Schema.SchemaError>
   /** Waits for the client to send `method` and returns its params. */
   readonly awaitRequest: (method: string) => Effect.Effect<unknown>
+  /** Waits for the client's response to an agent request. */
+  readonly awaitReply: (id: RequestId) => Effect.Effect<Record<string, unknown>>
   /** Every message the client sent, in order. */
   readonly received: Effect.Effect<ReadonlyArray<Record<string, unknown>>>
   /** Releases a held `session/new`. */
@@ -82,8 +84,9 @@ export const scriptedAgent = (
     // Requests the client has sent that the agent has not answered yet.
     const openRequests = new Map<string, Array<{ readonly id: RequestId; readonly params: unknown }>>()
     const arrivals = new Map<string, Array<Deferred.Deferred<unknown>>>()
+    const replies = new Map<RequestId, Deferred.Deferred<Record<string, unknown>>>()
     const outbox = yield* Queue.unbounded<string>()
-    const held = yield* Deferred.make<unknown>()
+    let held = yield* Deferred.make<unknown>()
 
     const emit = (message: unknown) => Json.encode(message).pipe(Effect.flatMap((text) => Queue.offer(outbox, text)))
 
@@ -106,7 +109,10 @@ export const scriptedAgent = (
           return emit({ jsonrpc: "2.0", id, result: options.initialize ?? defaultInitialize(options.version) })
         case "session/new":
           return options.holdNewSession
-            ? Effect.flatMap(Deferred.await(held), (result) => emit({ jsonrpc: "2.0", id, result }))
+            ? Effect.flatMap(Deferred.await(held), (result) => Effect.gen(function*() {
+              held = yield* Deferred.make<unknown>()
+              yield* emit({ jsonrpc: "2.0", id, result })
+            }))
             : emit({ jsonrpc: "2.0", id, result: { sessionId: options.uniqueSessions ? `sess-${++sessions}` : "sess-1", ...(options.version === 1 ? { modes: { currentModeId: "architect", availableModes: [{ id: "architect", name: "Architect" }] } } : {}) } })
         default:
           // Everything else is answered explicitly by the test.
@@ -120,7 +126,11 @@ export const scriptedAgent = (
         if (!isRecord(parsed)) return yield* Effect.die("Expected a JSON-RPC object")
         const message = parsed
         received.push(message)
-        if (typeof message?.method !== "string") return
+        if (typeof message?.method !== "string") {
+          const waiting = replies.get(message.id as RequestId)
+          if (waiting !== undefined) yield* Deferred.succeed(waiting, message)
+          return
+        }
         const id = message.id
         if (id !== undefined && id !== null && typeof id !== "string" && typeof id !== "number") {
           return yield* Effect.die("Invalid JSON-RPC request id")
@@ -175,6 +185,14 @@ export const scriptedAgent = (
           const waiting = arrivals.get(method) ?? []
           waiting.push(deferred)
           arrivals.set(method, waiting)
+          return Deferred.await(deferred)
+        }),
+      awaitReply: (id) =>
+        Effect.suspend(() => {
+          const reply = received.find((message) => message.id === id && typeof message.method !== "string")
+          if (reply !== undefined) return Effect.succeed(reply)
+          const deferred = replies.get(id) ?? Deferred.makeUnsafe<Record<string, unknown>>()
+          replies.set(id, deferred)
           return Deferred.await(deferred)
         }),
       received: Effect.sync(() => received.slice()),
