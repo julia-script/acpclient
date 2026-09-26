@@ -18,6 +18,18 @@ export class UnsupportedSchemaError extends Data.TaggedError("UnsupportedSchemaE
   }
 }
 
+export class UnknownOverrideError extends Data.TaggedError("UnknownOverrideError")<{
+  readonly definition: string
+  readonly version: number
+  readonly message: string
+}> {
+  constructor(definition: string, version: number) {
+    super({ definition, version, message: `Override for unknown definition ${definition} in v${version}` })
+  }
+}
+
+export type EmitError = UnsupportedSchemaError | UnknownOverrideError
+
 const annotationKeywords = new Set([
   "$schema",
   "$comment",
@@ -276,7 +288,10 @@ const orderDefinitions = (definitions: Readonly<Record<string, unknown>>): Reado
     if (state.get(name) === "done") return
     if (state.get(name) === "visiting") throw new UnsupportedSchemaError(name, "$ref", `recursive reference ${[...path, name].join(" -> ")}`)
     state.set(name, "visiting")
-    for (const dep of [...deps.get(name)!].sort()) visit(dep, [...path, name])
+    for (const dep of [...deps.get(name)!].sort()) {
+      if (!deps.has(dep)) throw new UnsupportedSchemaError(name, "$ref", `unknown definition ${dep}`)
+      visit(dep, [...path, name])
+    }
     state.set(name, "done")
     ordered.push(name)
   }
@@ -344,13 +359,12 @@ export interface EmitOptions {
   readonly overrides?: Overrides
 }
 
-/** Emits the complete TypeScript module for one pinned schema input. */
-export const emitModule = (document: JsonSchemaDocument, options: EmitOptions): string => {
+const emitModuleUnsafe = (document: JsonSchemaDocument, options: EmitOptions): string => {
   const { input, manifest } = options
   const definitions = document.$defs
   const overrides = (options.overrides ?? defaultOverrides)[input.version] ?? {}
   for (const name of Object.keys(overrides)) {
-    if (!(name in definitions)) throw new Error(`Override for unknown definition ${name} in v${input.version}`)
+    if (!(name in definitions)) throw new UnknownOverrideError(name, input.version)
   }
   const out: Array<string> = []
   out.push(
@@ -405,6 +419,16 @@ export const emitModule = (document: JsonSchemaDocument, options: EmitOptions): 
     )
   }
   return out.filter((line, i, all) => !(line === "" && all[i - 1] === "")).join("\n") + "\n"
+}
+
+/** Emits one pinned schema module, returning expected diagnostics as failures. */
+export const emitModule = (document: JsonSchemaDocument, options: EmitOptions): Result.Result<string, EmitError> => {
+  try {
+    return Result.succeed(emitModuleUnsafe(document, options))
+  } catch (error) {
+    if (error instanceof UnsupportedSchemaError || error instanceof UnknownOverrideError) return Result.fail(error)
+    throw error
+  }
 }
 
 /** Collapse primitives that already include literal members; preserve runtime union validation. */

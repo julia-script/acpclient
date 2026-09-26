@@ -4,14 +4,17 @@ import * as Effect from "effect/Effect"
 import * as Logger from "effect/Logger"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
-import { emitModule } from "./emit.ts"
-import { loadInput, loadManifest, root } from "./inputs.ts"
+import { emitModule, type EmitOptions } from "./emit.ts"
+import { loadInput, loadManifest, root, type JsonSchemaDocument } from "./inputs.ts"
+
+/** Converts emission diagnostics into the generator's typed failure channel. */
+export const generateSource = (schema: JsonSchemaDocument, options: EmitOptions) => Effect.fromResult(emitModule(schema, options))
 
 export const generateAll = Effect.gen(function*() {
   const manifest = yield* loadManifest()
   return yield* Effect.forEach(manifest.inputs, (input) => Effect.gen(function*() {
     const { schema } = yield* loadInput(input)
-    return { output: input.output, source: emitModule(schema, { manifest, input }) }
+    return { output: input.output, source: yield* generateSource(schema, { manifest, input }) }
   }), { concurrency: "unbounded" })
 })
 
