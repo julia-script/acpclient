@@ -192,7 +192,7 @@ The count is one because this v1 echo agent streams its reply but does not echo 
 
 Validate a descriptor loaded from application storage with `AcpGateway.SessionDescriptor` using `Schema.decodeUnknownEffect`. Treat failed validation as invalid saved state instead of asserting the shape. The gateway validates its own saved admissions and snapshots when loading them.
 
-The current storage interface has no typed error channel. Integrate your application's persistence policy explicitly; a throwing JSON/localStorage wrapper is not reliable recovery storage. If persistence cannot be made available, keep the UI in an error state instead of claiming the operation is safely saved. See the [storage contract](../reference/hosting.md#storage) for the exact interface and limitation.
+`Storage.save` has a typed error channel. The built-in `memoryStorage()` reports an uncloneable value as `AcpGateway.GatewayError` with code `Invalid`; a durable adapter can declare its own `Storage<SaveError>` type, which the gateway client's operations preserve. Integrate your application's persistence policy explicitly; a throwing JSON/localStorage wrapper is not reliable recovery storage. If persistence cannot be made available, keep the UI in an error state instead of claiming the operation is safely saved. See the [storage contract](../reference/hosting.md#storage) for the exact interface.
 
 ## Reconcile interrupted operations
 

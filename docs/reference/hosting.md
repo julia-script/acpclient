@@ -50,9 +50,9 @@ Storage keys must distinguish unrelated identities and workspaces in the applica
 
 ## Storage
 
-`Storage.load(key)` returns `Effect<unknown>`. `save(key, value)` returns `Effect<void>`. `remove(key)` returns `Effect<void>`. The unknown value is an external persistence boundary; schemas validate retained protocol values when loaded.
+`Storage.load(key)` returns `Effect<unknown>`. `save(key, value)` returns `Effect<void, SaveError>`, and `remove(key)` returns `Effect<void>`. The optional `Storage<SaveError>` type parameter defaults to `AcpGateway.GatewayError`; `fromApi`, `make`, and `connect` retain a custom adapter's save error type. The unknown loaded value is an external persistence boundary; schemas validate retained protocol values when loaded.
 
-The interface has no typed storage failure or environment channel. Adapters must be composed with their dependencies and implement the application's failure policy. Synchronous browser storage and serialization may throw; putting them inside `Effect.sync` changes those failures into defects rather than handling them. The library does not provide a durable browser-storage adapter.
+The interface has no storage environment channel. Adapters must be composed with their dependencies and implement the application's failure policy. Synchronous browser storage and serialization may throw; convert expected failures into the adapter's typed save error instead of leaving them as defects in `Effect.sync`. The library does not provide a durable browser-storage adapter. `memoryStorage()` reports an uncloneable value as `AcpGateway.GatewayError` with code `Invalid`, leaving the previous value for that key intact.
 
 Values must round-trip as structured data. Saves of operation admission data complete before transmission. Stored state includes logical identity, window tokens, operation IDs/admissions, cursors, and snapshots; command and transcript contents can be present. The application persists its session descriptor separately. `memoryStorage()` clones saved values into a Map and survives only as long as that object.
 
