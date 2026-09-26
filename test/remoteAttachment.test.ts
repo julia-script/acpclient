@@ -181,6 +181,37 @@ test("live metadata still blocks stale takeover when retained storage is unavail
   yield* active.release
 })))
 
+test("an in-flight attachment blocks a stale takeover before its first save", () => run(Effect.gen(function*() {
+  const h = yield* hostedHarness(2)
+  const original = yield* h.connection.newSession({ cwd: "/work" })
+  const descriptor = h.remote.descriptor(original)!
+  yield* original.release
+  const base = GC.memoryStorage()
+  const saving = yield* Deferred.make<void>()
+  const proceed = yield* Deferred.make<void>()
+  let gateFirstSave = true
+  const sessionKey = `:session:${descriptor.session}`
+  const storage: GC.Storage = {
+    load: (key) => key.endsWith(sessionKey) ? Effect.void : base.load(key),
+    save: (key, value) => Effect.suspend(() => {
+      if (!key.endsWith(sessionKey) || !gateFirstSave) return base.save(key, value)
+      gateFirstSave = false
+      return Deferred.succeed(saving, undefined).pipe(
+        Effect.andThen(Deferred.await(proceed)), Effect.andThen(base.save(key, value)))
+    }),
+    remove: base.remove
+  }
+  const gateway = yield* GC.fromApi(apiFor(h.host), { workspace: "work", storage })
+  const remote = yield* Remote.make(gateway, { profile: "test" })
+  const first = yield* remote.attach(descriptor).pipe(Effect.forkChild)
+  yield* Deferred.await(saving)
+  expect(code(yield* Effect.exit(remote.attach({ ...descriptor, sessionId: "wrong" }, true)))).toBe("Invalid")
+  yield* Deferred.succeed(proceed, undefined)
+  const active = yield* Fiber.join(first)
+  expect(code(yield* Effect.exit(active.cancel))).toBe("success")
+  yield* active.release
+})))
+
 test("an explicit takeover replaces an active local attachment", () => run(Effect.gen(function*() {
   const h = yield* hostedHarness(2)
   const original = yield* h.connection.newSession({ cwd: "/work" })

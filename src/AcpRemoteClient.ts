@@ -36,7 +36,6 @@ export const make = (gateway: Client, options: Options) => Effect.gen(function*(
   if (!Number.isSafeInteger(capacity) || capacity <= 0) return yield* AcpGateway.failure("Invalid")
   const descriptors = new WeakMap<AcpSession, SessionDescriptor>()
   const controllers = new Map<string, number>()
-  const active = new Map<string, { sessionId: SessionSnapshot["sessionId"]; version: SessionSnapshot["version"]; token: symbol }>()
   const run = (command: AcpGateway.Command, generation?: number): Effect.Effect<unknown, AcpGateway.CommandError> =>
     network(gateway.command(command, generation)).pipe(Effect.flatMap((op) => op.error ? Effect.fail(op.error) : Effect.succeed(op.result)))
 
@@ -48,17 +47,14 @@ export const make = (gateway: Client, options: Options) => Effect.gen(function*(
         entries.delete(cacheKey)
         requests.delete(cacheKey)
       }
-      if (active.get(descriptor.session)?.token === token) active.delete(descriptor.session)
     }))
     const key = `${gateway.prefix}:session:${descriptor.session}`
     const saved = yield* gateway.storage.load(key).pipe(Effect.flatMap(Schema.decodeUnknownEffect(RetainedSession)), Effect.mapError(() => AcpGateway.failure("Invalid")))
     const retained = saved?.cursor.epoch === gateway.window.epoch ? saved : undefined
     // A retained frame came from this host epoch. Reject mismatched metadata
     // before Attach, since takeover would revoke the current controller.
-    const activeMetadata = active.get(descriptor.session)
     if ((retained && retained.cursor.session !== descriptor.session) ||
-      (retained && (retained.snapshot.sessionId !== descriptor.sessionId || retained.snapshot.version !== descriptor.version)) ||
-      (activeMetadata && (activeMetadata.sessionId !== descriptor.sessionId || activeMetadata.version !== descriptor.version))) {
+      (retained && (retained.snapshot.sessionId !== descriptor.sessionId || retained.snapshot.version !== descriptor.version))) {
       return yield* AcpGateway.failure("Invalid")
     }
     let snapshot = retained?.snapshot
@@ -73,7 +69,6 @@ export const make = (gateway: Client, options: Options) => Effect.gen(function*(
       if (controllers.get(descriptor.session) === generation) {
         controllers.delete(descriptor.session)
       }
-      if (active.get(descriptor.session)?.token === token) active.delete(descriptor.session)
       if (entries.get(cacheKey) === token) {
         entries.delete(cacheKey)
         requests.delete(cacheKey)
@@ -110,7 +105,6 @@ export const make = (gateway: Client, options: Options) => Effect.gen(function*(
       Effect.andThen(failure(AcpGateway.failure("Closed"))), Effect.catch((error) => failure(error)), Effect.forkIn(owned))
     yield* Deferred.await(ready)
     if (snapshot!.sessionId !== descriptor.sessionId || snapshot!.version !== descriptor.version) return yield* AcpGateway.failure("Invalid")
-    active.set(descriptor.session, { sessionId: snapshot!.sessionId, version: snapshot!.version, token })
     const observe: AcpSession["observe"] = Effect.gen(function*() {
       const queue = yield* Queue.bounded<Observation, AcpSubscriptionOverflow | AcpGateway.GatewayError | Cause.Done>(capacity)
       observers.add(queue)
@@ -192,6 +186,14 @@ export const make = (gateway: Client, options: Options) => Effect.gen(function*(
   } }).pipe(Scope.provide(mapScope))
   const attach = (descriptor: SessionDescriptor, takeover = false): Effect.Effect<AcpSession, AcpGateway.GatewayError, Scope.Scope> => Effect.gen(function*() {
     if (descriptor.epoch !== gateway.window.epoch) return yield* AcpGateway.failure("HostRestarted")
+    // The first caller records its descriptor before RcMap starts lookup, so
+    // another key cannot take over that session with mismatched metadata.
+    for (const request of requests.values()) {
+      if (request.descriptor.session === descriptor.session &&
+        (request.descriptor.sessionId !== descriptor.sessionId || request.descriptor.version !== descriptor.version)) {
+        return yield* AcpGateway.failure("Invalid")
+      }
+    }
     const borrowed = yield* Scope.fork(yield* Scope.Scope)
     const cacheKey = `${descriptor.session.length}:${descriptor.session}${descriptor.sessionId.length}:${descriptor.sessionId}${descriptor.version}${takeover ? 1 : 0}`
     if (!requests.has(cacheKey)) requests.set(cacheKey, { descriptor, takeover })
