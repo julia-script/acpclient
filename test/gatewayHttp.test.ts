@@ -1,6 +1,8 @@
 import { expect, test } from "bun:test"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Logger from "effect/Logger"
+import * as Cause from "effect/Cause"
 import * as HttpRouter from "effect/unstable/http/HttpRouter"
 import * as Gateway from "../src/AcpGateway.ts"
 import * as Host from "../src/AcpHost.ts"
@@ -19,4 +21,23 @@ for (const denial of ["origin", "authentication"] as const) test(`gateway reject
     expect(response.status).toBe(denial === "origin" ? 403 : 401)
     expect(launches).toBe(0)
   } finally { (yield* Effect.promise(() => app.dispose()))}
+})))
+
+test("gateway authentication defects are logged with their cause and return only 401", () => Effect.runPromise(Effect.gen(function*() {
+  const defect = new Error("private auth secret")
+  const logs: Array<Logger.Options<unknown>> = []
+  const logger = Logger.make<unknown, void>((entry) => { logs.push(entry) })
+  const route = GatewayHttp.route({ allowOrigin: () => true, authenticate: () => Effect.die(defect) })
+  const application = HttpRouter.addAll([route]).pipe(Layer.provideMerge(Host.layer({ policy, authorize: () => Effect.void,
+    open: () => Effect.die("must not launch") })), Layer.provideMerge(HttpRouter.layer), Layer.provideMerge(Logger.layer([logger])))
+  const app = HttpRouter.toWebHandler(application, { disableLogger: true })
+  try {
+    const response = yield* Effect.promise(() => app.handler(new Request("http://localhost/acp/gateway")))
+    expect(response.status).toBe(401)
+    expect(yield* Effect.promise(() => response.text())).not.toContain("private auth secret")
+    const diagnostic = logs.filter((entry) => Array.isArray(entry.message) && entry.message[0] === "Gateway authentication failed")
+    expect(diagnostic).toHaveLength(1)
+    expect(Cause.isDieReason(diagnostic[0]!.cause.reasons[0]!)).toBe(true)
+    expect(diagnostic[0]!.cause.reasons[0]).toMatchObject({ defect })
+  } finally { yield* Effect.promise(() => app.dispose()) }
 })))

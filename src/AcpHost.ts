@@ -88,10 +88,16 @@ const canonicalValue = (value: Schema.Json): Schema.Json => {
 const canonical = (value: unknown) => Json.encode(value).pipe(
   Effect.flatMap(Json.decode),
   Effect.flatMap((decoded) => Json.encode(canonicalValue(decoded))),
+  Effect.tapCause((cause) => Cause.hasInterruptsOnly(cause) ? Effect.void : Effect.logError("Cannot serialize hosted command", cause)),
+  Effect.mapError(() => AcpGateway.failure("Invalid"))
+)
+const hostedId = randomUUID.pipe(
+  Effect.tapCause((cause) => Cause.hasInterruptsOnly(cause) ? Effect.void : Effect.logError("Cannot generate hosted ID", cause)),
   Effect.mapError(() => AcpGateway.failure("Invalid"))
 )
 const safe = (cause: Cause.Cause<unknown>) => {
-  const error = Cause.squash(cause)
+  const reason = cause.reasons.length === 1 ? cause.reasons[0] : undefined
+  const error = reason && Cause.isFailReason(reason) ? reason.error : undefined
   if (Schema.is(AcpGateway.CommandError)(error)) {
     switch (error._tag) {
       case "AcpGatewayError": return AcpGateway.failure(error.code)
@@ -111,7 +117,7 @@ export const make = <R, E>(options: Options<R, E>) => Effect.gen(function*() {
   const scope = yield* Scope.Scope
   const services = yield* Effect.context<R>()
   const authorize = (identity: AcpGateway.Identity, access: Access) => options.authorize(identity, access).pipe(Effect.provideContext(services))
-  const epoch = (yield* randomUUID.pipe(Effect.mapError(() => AcpGateway.failure("Invalid"))))
+  const epoch = yield* hostedId
   const owners = new Map<string, Owner>()
   const sessions = new Map<string, Session>()
   const windows = new Map<string, WindowRecord>()
@@ -175,7 +181,7 @@ export const make = <R, E>(options: Options<R, E>) => Effect.gen(function*() {
     const event: AcpGateway.Frame & { _tag: "Event" } = { _tag: "Event", cursor: cursor(session, ++session.sequence), snapshot }
     const encoded = yield* Json.encode(event).pipe(Effect.result)
     if (Result.isFailure(encoded)) {
-      yield* Effect.logError("Cannot serialize hosted session snapshot", encoded.failure)
+      yield* Effect.logError("Cannot serialize hosted session snapshot", Cause.fail(encoded.failure))
       return yield* expire(session)
     }
     const size = textBytes(encoded.success)
@@ -200,7 +206,7 @@ export const make = <R, E>(options: Options<R, E>) => Effect.gen(function*() {
     const owned = yield* Scope.fork(scope)
     const observerScope = yield* Scope.fork(owned)
     const observed = yield* Scope.provide(handle.observe, observerScope)
-    const session: Session = { id: (yield* randomUUID.pipe(Effect.mapError(() => AcpGateway.failure("Invalid")))), owner, handle, scope: owned, snapshot: observed.snapshot, sequence: 0,
+    const session: Session = { id: (yield* hostedId), owner, handle, scope: owned, snapshot: observed.snapshot, sequence: 0,
       journal: [], bytes: 0, floor: 0, generation: 0, closing: false }
     sessions.set(session.id, session)
     owner.sessions.add(session.id)
@@ -228,7 +234,7 @@ export const make = <R, E>(options: Options<R, E>) => Effect.gen(function*() {
     const existing = [...windows.values()].find((w) => w.principal === identity.principalId && w.value.clientId === input.clientId && w.value.workspace === input.workspace)
     if (existing) return existing.value
     if (windows.size >= policy.commands) return yield* AcpGateway.failure("Capacity")
-    const value: AcpGateway.Window = { token: (yield* randomUUID.pipe(Effect.mapError(() => AcpGateway.failure("Invalid")))), epoch, workspace: input.workspace, clientId: input.clientId, expiresAt: now + policy.retryMs }
+    const value: AcpGateway.Window = { token: (yield* hostedId), epoch, workspace: input.workspace, clientId: input.clientId, expiresAt: now + policy.retryMs }
     windows.set(value.token, { value, principal: identity.principalId })
     return value
   })
@@ -242,7 +248,7 @@ export const make = <R, E>(options: Options<R, E>) => Effect.gen(function*() {
         limits: { transcriptBytes: policy.transcriptBytes, terminalBytes: policy.terminalBytes }, observerCapacity: policy.subscriberCapacity
       }).pipe(Scope.provide(owned), Effect.provideContext(services), Effect.exit, Effect.ensuring(Effect.sync(() => { opening-- })))
       if (Exit.isFailure(connected)) { yield* Scope.close(owned, Exit.void); return yield* Effect.failCause(connected.cause) }
-      const owner: Owner = { id: (yield* randomUUID.pipe(Effect.mapError(() => AcpGateway.failure("Invalid")))), identity: identity.principalId, workspace: window.workspace,
+      const owner: Owner = { id: (yield* hostedId), identity: identity.principalId, workspace: window.workspace,
         clientId: window.clientId, connection: connected.value, scope: owned, lock: Semaphore.makeUnsafe(1), sessions: new Set(), closed: false }
       owners.set(owner.id, owner)
       yield* report("opened")
@@ -326,10 +332,12 @@ export const make = <R, E>(options: Options<R, E>) => Effect.gen(function*() {
     yield* execute(identity, window.value, input.command, (result) => { record.value = { ...record.value, result } }).pipe(
       Effect.matchCauseEffect({
         onSuccess: (result) => Effect.sync(() => { record.value = { ...record.value, status: "succeeded", result: result ?? null } }),
-        onFailure: (cause) => Effect.sync(() => {
-          const failure = safe(cause)
-          record.value = { ...record.value, status: failure._tag === "AcpGatewayError" && failure.code === "OutcomeUnknown" ? "outcomeUnknown" : "failed", error: failure }
-        })
+        onFailure: (cause) => Cause.hasInterruptsOnly(cause) ? Effect.failCause(cause) : Effect.andThen(
+          Effect.logError("Hosted operation failed", cause),
+          Effect.sync(() => {
+            const failure = safe(cause)
+            record.value = { ...record.value, status: failure._tag === "AcpGatewayError" && failure.code === "OutcomeUnknown" ? "outcomeUnknown" : "failed", error: failure }
+          }))
       }), Effect.ensuring(report("settled")), Effect.interruptible, Effect.forkIn(scope))
     yield* report("admitted")
     return record.value
@@ -374,7 +382,9 @@ export const make = <R, E>(options: Options<R, E>) => Effect.gen(function*() {
   const list = (identity: AcpGateway.Identity, input: { epoch: string; workspace: string; connection: string; cwd?: string }) => Effect.gen(function*() {
     yield* checkEpoch(input.epoch)
     const owner = yield* ownerFor(identity, input.workspace, input.connection)
-    return yield* owner.connection.listSessions(input.cwd).pipe(Effect.mapError(() => AcpGateway.failure("AgentFailure")))
+    return yield* owner.connection.listSessions(input.cwd).pipe(
+      Effect.tapCause((cause) => Cause.hasInterruptsOnly(cause) ? Effect.void : Effect.logError("Hosted session list failed", cause)),
+      Effect.mapError(() => AcpGateway.failure("AgentFailure")))
   })
   yield* Effect.addFinalizer(() => Effect.sync(() => { stopping = true }))
   return { epoch, hello, admit, operation, attach, list, closed: (identity: AcpGateway.Identity, input: { epoch: string; workspace: string; connection: string }) => Effect.gen(function*() {

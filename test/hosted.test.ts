@@ -5,6 +5,7 @@ import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
+import * as Logger from "effect/Logger"
 import * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
@@ -24,6 +25,46 @@ const session = Effect.gen(function*() {
   const h = yield* hostedHarness(2)
   const handle = yield* h.connection.newSession({ cwd: "/private-work" })
   return { ...h, handle, descriptor: h.remote.descriptor(handle)! }
+})
+
+test("host logs the complete operation cause while retaining a sanitized failure", () => {
+  const defect = new Error("private connection secret")
+  const mixed = Cause.fromReasons([
+    ...Cause.fail(AcpGateway.failure("Invalid")).reasons,
+    ...Cause.die(defect).reasons,
+    ...Cause.interrupt(1).reasons
+  ])
+  const logs: Array<Logger.Options<unknown>> = []
+  const logger = Logger.make<unknown, void>((entry) => { logs.push(entry) })
+  return run(Effect.gen(function*() {
+    const host = yield* Host.make({ policy, authorize: () => Effect.void,
+      open: () => Effect.failCause(mixed) })
+    const window = yield* host.hello(identity, { version: 1, workspace: "work", clientId: "client" })
+    yield* host.admit(identity, { window, operationId: "open", command: { _tag: "Open", profile: "demo", options: null } })
+    yield* until(Effect.map(host.operation(identity, { window, operationId: "open" }), (value) => value.status !== "admitted").pipe(Effect.orDie))
+    const operation = yield* host.operation(identity, { window, operationId: "open" })
+    expect(operation.status).toBe("failed")
+    expect(operation.error).toMatchObject({ _tag: "AcpGatewayError", code: "AgentFailure" })
+    expect(yield* Json.encode(operation)).not.toContain("private connection secret")
+    const diagnostic = logs.filter((entry) => Array.isArray(entry.message) && entry.message[0] === "Hosted operation failed")
+    expect(diagnostic).toHaveLength(1)
+    expect(diagnostic[0]!.cause.reasons).toEqual(mixed.reasons)
+  }).pipe(Effect.provide(Logger.layer([logger]))))
+})
+
+test("host preserves pure interruption without a failure diagnostic", () => {
+  const logs: Array<Logger.Options<unknown>> = []
+  const logger = Logger.make<unknown, void>((entry) => { logs.push(entry) })
+  return run(Effect.gen(function*() {
+    const host = yield* Host.make({ policy, authorize: () => Effect.interrupt, open: () => Effect.die("must not open") })
+    const exit = yield* Effect.exit(host.hello(identity, { version: 1, workspace: "work", clientId: "client" }))
+    expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true)
+    const attach = yield* Effect.exit(Stream.runHead(host.attach(identity, {
+      epoch: host.epoch, workspace: "work", session: "s", clientId: "client"
+    })))
+    expect(Exit.isFailure(attach) && Cause.hasInterruptsOnly(attach.cause)).toBe(true)
+    expect(logs).toHaveLength(0)
+  }).pipe(Effect.provide(Logger.layer([logger]))))
 })
 
 test("host validates every finite bound and rejects incompatible gateway versions before opening", () => run(Effect.gen(function*() {

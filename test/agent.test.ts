@@ -13,6 +13,7 @@ import * as DateTime from "effect/DateTime"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Logger from "effect/Logger"
 import * as Scope from "effect/Scope"
 import * as Sink from "effect/Sink"
 import * as Stdio from "effect/Stdio"
@@ -232,11 +233,14 @@ describe("prompt insertion and execution", () => {
       expect(field(response, "error.message")).toMatch(/Unknown session nope/)
     })))
 
-  test("a handler defect becomes a bare Internal error, leaking no cause", () =>
-    run(Effect.gen(function*() {
+  test("a handler defect becomes a bare Internal error, leaking no cause", () => {
+    const defect = new Error("database password is hunter2")
+    const logs: Array<Logger.Options<unknown>> = []
+    const logger = Logger.make<unknown, void>((entry) => { logs.push(entry) })
+    return run(Effect.gen(function*() {
       const agent = AcpAgent.make({
         ...baseOptions(),
-        session: { create: () => Effect.die(new Error("database password is hunter2")) }
+        session: { create: () => Effect.die(defect) }
       })
       const peer = yield* connect(agent)
       yield* peer.send(initialize(2))
@@ -246,7 +250,50 @@ describe("prompt insertion and execution", () => {
       expect(field(response, "error.code")).toBe(-32603)
       expect(field(response, "error.message")).toBe("Internal error")
       expect((yield* Json.encode(response))).not.toContain("hunter2")
-    })))
+      const diagnostic = logs.filter((entry) => Array.isArray(entry.message) && entry.message[0] === "Agent handler failed")
+      expect(diagnostic).toHaveLength(1)
+      expect(diagnostic[0]!.cause.reasons).toEqual([expect.objectContaining({ _tag: "Die", defect })])
+    }).pipe(Effect.provide(Logger.layer([logger]))))
+  })
+})
+
+test("an expected prompt failure logs its original cause before returning refusal", () => {
+  const failure = new AcpAgent.AcpAgentError({ code: -32603, message: "private prompt failure", data: null })
+  const logs: Array<Logger.Options<unknown>> = []
+  const logger = Logger.make<unknown, void>((entry) => { logs.push(entry) })
+  return run(Effect.gen(function*() {
+    const agent = AcpAgent.make({ ...baseOptions(), prompt: {
+      insert: () => Effect.succeed({ messageId: "m-1" }), execute: () => Effect.fail(failure)
+    } })
+    const peer = yield* connect(agent)
+    yield* peer.send(initialize(1)); yield* peer.next
+    yield* peer.send({ jsonrpc: "2.0", id: 1, method: "session/new", params: { cwd: "/tmp", mcpServers: [] } }); yield* peer.next
+    yield* peer.send({ jsonrpc: "2.0", id: 2, method: "session/prompt", params: { sessionId: "s-1", prompt: [] } })
+    const response = yield* peer.next
+    expect(field(response, "result.stopReason")).toBe("refusal")
+    expect((yield* Json.encode(response))).not.toContain("private prompt failure")
+    const diagnostic = logs.filter((entry) => Array.isArray(entry.message) && entry.message[0] === "Agent execution failed")
+    expect(diagnostic).toHaveLength(1)
+    expect(diagnostic[0]!.cause.reasons).toEqual([expect.objectContaining({ _tag: "Fail", error: failure })])
+  }).pipe(Effect.provide(Logger.layer([logger]))))
+})
+
+test("a private store failure is logged before becoming a bare wire error", () => {
+  const failure = new Store.StoreError({ kind: "Corrupt", message: "private store secret", cause: new Error("storage stack") })
+  const logs: Array<Logger.Options<unknown>> = []
+  const logger = Logger.make<unknown, void>((entry) => { logs.push(entry) })
+  return run(Effect.gen(function*() {
+    const agent = AcpAgent.make({ ...baseOptions(), session: { create: () => Effect.fail(failure) } })
+    const peer = yield* connect(agent)
+    yield* peer.send(initialize(2)); yield* peer.next
+    yield* peer.send({ jsonrpc: "2.0", id: 1, method: "session/new", params: { cwd: "/tmp" } })
+    const response = yield* peer.next
+    expect(field(response, "error")).toEqual({ code: -32603, message: "Internal error" })
+    expect((yield* Json.encode(response))).not.toContain("private store secret")
+    const diagnostic = logs.filter((entry) => Array.isArray(entry.message) && entry.message[0] === "Agent store operation failed")
+    expect(diagnostic).toHaveLength(1)
+    expect(diagnostic[0]!.cause.reasons).toEqual([expect.objectContaining({ _tag: "Fail", error: failure })])
+  }).pipe(Effect.provide(Logger.layer([logger]))))
 })
 
 describe("client interactions", () => {

@@ -496,6 +496,13 @@ export const make = <R = never>(options: Options<R>): AcpAgent<R> => {
 
       // --- request handling --------------------------------------------------
 
+      const logPrivateError = (cause: Cause.Cause<unknown>) => {
+        const reason = cause.reasons.length === 1 ? cause.reasons[0] : undefined
+        return reason && Cause.isFailReason(reason) && reason.error instanceof StoreError && reason.error.kind !== "SessionError"
+          ? Effect.logError("Agent store operation failed", cause)
+          : Effect.void
+      }
+
       const requirePeer = Effect.suspend(() =>
         peer === undefined
           ? Effect.fail(new AcpRemoteError({ code: ErrorCode.InvalidRequest, message: "Not initialized" }))
@@ -504,6 +511,7 @@ export const make = <R = never>(options: Options<R>): AcpAgent<R> => {
 
       const requireSession = (sessionId: string) =>
         store.get(sessionId).pipe(
+          Effect.tapCause(logPrivateError),
           Effect.mapError(toRemote),
           Effect.filterOrFail(
             (session) => session !== undefined,
@@ -518,12 +526,12 @@ export const make = <R = never>(options: Options<R>): AcpAgent<R> => {
        */
       const handler = <A>(effect: Effect.Effect<A, HandlerError, R>) =>
         effect.pipe(
+          Effect.tapCause(logPrivateError),
           Effect.mapError(toRemote),
-          Effect.catchDefect(() =>
-            Effect.andThen(
-              Effect.logError("Agent handler failed"),
-              Effect.fail(new AcpRemoteError({ code: ErrorCode.InternalError, message: "Internal error" }))
-            )
+          Effect.catchCauseIf(
+            (cause) => cause.reasons.some(Cause.isDieReason) && !Cause.hasInterrupts(cause),
+            (cause) => Effect.andThen(Effect.logError("Agent handler failed", cause),
+              Effect.fail(new AcpRemoteError({ code: ErrorCode.InternalError, message: "Internal error" })))
           ),
           provided
         )
@@ -560,7 +568,7 @@ export const make = <R = never>(options: Options<R>): AcpAgent<R> => {
             sessionId: created.sessionId,
             cwd: request.cwd,
             additionalDirectories: request.additionalDirectories ?? null
-          }).pipe(Effect.mapError(toRemote))
+          }).pipe(Effect.tapCause(logPrivateError), Effect.mapError(toRemote))
           return { sessionId: created.sessionId }
         })
 
@@ -577,9 +585,10 @@ export const make = <R = never>(options: Options<R>): AcpAgent<R> => {
             Effect.catchCause((cause) => {
               if (Cause.hasInterruptsOnly(cause)) return Effect.failCause(cause)
               if (Cause.hasInterrupts(cause)) {
-                return Effect.andThen(Effect.logError("Agent execution failed", cause), Effect.failCause(cause))
+                // V1's request boundary logs this failure; V2 has already replied.
+                return context.version === 1 ? Effect.failCause(cause) : Effect.andThen(Effect.logError("Agent execution failed", cause), Effect.failCause(cause))
               }
-              return Effect.andThen(Effect.logError("Agent execution failed"), Effect.succeed<StopReason>("refusal"))
+              return Effect.andThen(Effect.logError("Agent execution failed", cause), Effect.succeed<StopReason>("refusal"))
             })
           )
           // Final updates precede the idle signal.
@@ -611,7 +620,7 @@ export const make = <R = never>(options: Options<R>): AcpAgent<R> => {
             replacement: [...request.prompt],
             chunks: [],
             recordedAt: yield* DateTime.now
-          }).pipe(Effect.mapError(toRemote))
+          }).pipe(Effect.tapCause(logPrivateError), Effect.mapError(toRemote))
 
           if (state.cancelled) {
             state.inserting = false
@@ -658,7 +667,7 @@ export const make = <R = never>(options: Options<R>): AcpAgent<R> => {
       const routes: Array<AcpConnection.Route> = [
         { _tag: "Request", method: "initialize", run: (params) => initialize(params) },
         { _tag: "Request", method: "session/new", run: (params) => newSession(params) },
-        { _tag: "Request", method: "session/prompt", run: (params) => provided(prompt(params)).pipe(Effect.mapError(toRemote)) },
+        { _tag: "Request", method: "session/prompt", run: (params) => provided(prompt(params)).pipe(Effect.tapCause(logPrivateError), Effect.mapError(toRemote)) },
         {
           _tag: "Notification",
           method: "session/cancel",
@@ -681,7 +690,7 @@ export const make = <R = never>(options: Options<R>): AcpAgent<R> => {
                   updatedAt: session.updatedAt ?? null
                 }))
               })),
-              Effect.mapError(toRemote)
+              Effect.tapCause(logPrivateError), Effect.mapError(toRemote)
             )
         })
       }
@@ -722,7 +731,7 @@ export const make = <R = never>(options: Options<R>): AcpAgent<R> => {
               yield* requireSession(sessionId)
               yield* handler(remove({ sessionId, version: current.version, peer: current }))
               yield* ended(sessionId)
-              yield* store.remove(sessionId).pipe(Effect.mapError(toRemote))
+              yield* store.remove(sessionId).pipe(Effect.tapCause(logPrivateError), Effect.mapError(toRemote))
               return {}
             })
         })
@@ -786,7 +795,7 @@ export const make = <R = never>(options: Options<R>): AcpAgent<R> => {
               sessionUpdate: `${role}_chunk`, ...(context.version === 2 ? { messageId: message.messageId } : {}), content
             })
           }
-        }).pipe(Effect.mapError(toRemote))
+        }).pipe(Effect.tapCause(logPrivateError), Effect.mapError(toRemote))
 
       const dispatch = AcpConnection.handlers(routes)
       yield* connection.setHandlers({
