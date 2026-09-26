@@ -14,6 +14,7 @@ import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Ref from "effect/Ref"
+import * as String from "effect/String"
 import type { ContentBlock } from "./Content.ts"
 
 /** Why a store operation failed. */
@@ -65,7 +66,7 @@ export interface RetainedMessage {
 
 /** Session and transcript persistence. */
 export class Store extends Context.Service<Store, {
-  /** Lists session metadata, optionally filtered by working directory. */
+  /** Lists session metadata by lexical session ID, optionally filtered by working directory. */
   readonly list: (cwd?: string | null) => Effect.Effect<ReadonlyArray<SessionRef>, StoreError>
   /** Reads a session, or `undefined` when it does not exist. */
   readonly get: (sessionId: string) => Effect.Effect<SessionRef | undefined, StoreError>
@@ -124,7 +125,7 @@ export const InMemory = Effect.gen(function*() {
       Ref.get(state).pipe(Effect.map(({ sessions }) =>
         [...sessions.values()]
           .filter((session) => cwd === undefined || cwd === null || session.cwd === cwd)
-          .sort((a, b) => a.sessionId.localeCompare(b.sessionId))
+          .sort((a, b) => String.Order(a.sessionId, b.sessionId))
       )),
     get: (sessionId) => Ref.get(state).pipe(Effect.map(({ sessions }) => sessions.get(sessionId))),
     create: (session) =>
