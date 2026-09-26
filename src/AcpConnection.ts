@@ -140,8 +140,6 @@ export interface RequestOptions {
    * `AcpTimeoutError`; no cancellation is sent to the peer.
    */
   readonly timeout?: Duration.Input | undefined
-  /** Runs in notification order at the response boundary. */
-  readonly onResponseBoundary?: Effect.Effect<void> | undefined
 }
 
 /** An outgoing request that has been written. */
@@ -219,7 +217,6 @@ export const make = Effect.fnUntraced(function*(options: Options = {}) {
   let current = options.handlers
   let inFlight = 0
   const pending = new Map<RequestId, Deferred.Deferred<unknown, AcpRemoteError | AcpProtocolError | AcpConnectionClosed>>()
-  const responseBoundaries = new Map<RequestId, Effect.Effect<void>>()
   const active = new Map<RequestId, Deferred.Deferred<void>>()
   const done = yield* Deferred.make<AcpConnectionClosed>()
   const ready = yield* Deferred.make<void>()
@@ -228,7 +225,6 @@ export const make = Effect.fnUntraced(function*(options: Options = {}) {
   const notifications = yield* Queue.bounded<
     | { readonly _tag: "Notification"; readonly method: string; readonly params: unknown }
     | { readonly _tag: "Barrier"; readonly completed: Deferred.Deferred<void> }
-    | { readonly _tag: "ResponseBoundary"; readonly run: Effect.Effect<void> }
   >(
     options.notificationBuffer ?? 256
   )
@@ -239,7 +235,6 @@ export const make = Effect.fnUntraced(function*(options: Options = {}) {
       terminated = reason
       const waiting = [...pending.values()]
       pending.clear()
-      responseBoundaries.clear()
       return Effect.forEach(waiting, (deferred) => Deferred.fail(deferred, reason), { discard: true }).pipe(
         Effect.andThen(Deferred.succeed(done, reason)),
         Effect.andThen(Queue.shutdown(notifications)),
@@ -264,7 +259,7 @@ export const make = Effect.fnUntraced(function*(options: Options = {}) {
 
   // --- outgoing ---------------------------------------------------------------
 
-  const send = (method: string, params?: unknown, onResponseBoundary?: Effect.Effect<void>): Effect.Effect<PendingRequest, AcpConnectionClosed | AcpCapacityError | AcpProtocolError> =>
+  const send = (method: string, params?: unknown): Effect.Effect<PendingRequest, AcpConnectionClosed | AcpCapacityError | AcpProtocolError> =>
     Effect.suspend((): Effect.Effect<PendingRequest, AcpConnectionClosed | AcpCapacityError | AcpProtocolError> => {
       if (terminated) return Effect.fail(terminated)
       if (pending.size >= maxPending) {
@@ -273,12 +268,10 @@ export const make = Effect.fnUntraced(function*(options: Options = {}) {
       const id = nextId++
       const deferred = Deferred.makeUnsafe<unknown, AcpRemoteError | AcpProtocolError | AcpConnectionClosed>()
       pending.set(id, deferred)
-      if (onResponseBoundary !== undefined) responseBoundaries.set(id, onResponseBoundary)
       return write(JsonRpc.request(id, method, params)).pipe(
         Effect.onExit((exit) =>
           Exit.isSuccess(exit) ? Effect.void : Effect.sync(() => {
             if (pending.get(id) === deferred) pending.delete(id)
-            responseBoundaries.delete(id)
           })
         ),
         Effect.as<PendingRequest>({ id, method, response: Deferred.await(deferred) })
@@ -288,7 +281,7 @@ export const make = Effect.fnUntraced(function*(options: Options = {}) {
   const requestRaw = (method: string, params?: unknown, requestOptions?: RequestOptions) =>
     Effect.suspend(() => {
       let sentId: RequestId = null
-      const exchange = Effect.flatMap(send(method, params, requestOptions?.onResponseBoundary), (sent) => {
+      const exchange = Effect.flatMap(send(method, params), (sent) => {
         sentId = sent.id
         return sent.response
       })
@@ -327,12 +320,7 @@ export const make = Effect.fnUntraced(function*(options: Options = {}) {
       const deferred = pending.get(id)
       if (!deferred) return Effect.logWarning("Ignored response for unknown request id", id)
       pending.delete(id)
-      const boundary = responseBoundaries.get(id)
-      responseBoundaries.delete(id)
-      return Effect.andThen(
-        boundary === undefined ? Effect.void : Queue.offer(notifications, { _tag: "ResponseBoundary", run: boundary }),
-        Effect.asVoid(settleWith(deferred))
-      )
+      return Effect.asVoid(settleWith(deferred))
     })
 
   /** Registers an incoming request and returns the effect producing its response. */
@@ -442,7 +430,6 @@ export const make = Effect.fnUntraced(function*(options: Options = {}) {
   const dispatchNotifications = Queue.take(notifications).pipe(
     Effect.flatMap((entry) => {
       if (entry._tag === "Barrier") return Deferred.succeed(entry.completed, undefined)
-      if (entry._tag === "ResponseBoundary") return entry.run
       const { method, params } = entry
       return Deferred.await(ready).pipe(
         Effect.andThen(Effect.suspend(() => current?.notification?.(method, params) ?? Effect.void)),

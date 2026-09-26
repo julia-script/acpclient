@@ -1023,7 +1023,8 @@ describe("provisional routing bounds", () => {
           yield* agent.send(update)
         }
         expect(causeOf(yield* Fiber.await(resuming))).toContain("replay failed")
-        yield* until(Effect.map(session.snapshot, (snapshot) => hasText(snapshot, "after-response")))
+        yield* agent.update("sess-1", { sessionUpdate: "agent_message_chunk", messageId: "sentinel", content: text("sentinel") })
+        yield* until(Effect.map(session.snapshot, (snapshot) => hasText(snapshot, "sentinel")))
         const content = (yield* session.snapshot).messages.flatMap((message) => message.content)
         expect(content.filter((part) => "text" in part && part.text === "history")).toHaveLength(1)
         expect(content.filter((part) => "text" in part && part.text === "after-response")).toHaveLength(1)

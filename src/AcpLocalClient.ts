@@ -304,7 +304,7 @@ const makeRuntime = Effect.fnUntraced(function*(
 interface Provisional {
   readonly _tag: "provisional"
   readonly buffered: Array<{ sessionId: string; update: unknown }>
-  replayHistory: boolean
+  readonly replayHistory: boolean
   previous?: LiveRoute
   overflowed: boolean
   bytes: number
@@ -386,7 +386,7 @@ const connect = Effect.fnUntraced(function*(options: ConnectOptions) {
       if (route._tag === "live") return Effect.asVoid(route.runtime.apply({ _tag: "update", update }))
       buffer(route, sessionId, update)
       // A replay notification has no marker distinguishing it from new live
-      // traffic. Keep the prior runtime unchanged through the response boundary.
+      // traffic. Keep the prior runtime unchanged until this attempt ends.
       return route.previous === undefined || route.replayHistory
         ? Effect.void
         : Effect.asVoid(route.previous.runtime.apply({ _tag: "update", update }))
@@ -811,7 +811,7 @@ const connect = Effect.fnUntraced(function*(options: ConnectOptions) {
     knownSessionId: string | undefined,
     cwd: string,
     replayHistory: boolean,
-    request: (routeKey: string, onResponseBoundary: Effect.Effect<void>) => Effect.Effect<{ readonly sessionId: string; readonly result: V1.NewSessionResponse | V1.LoadSessionResponse | V1.ResumeSessionResponse | V2.NewSessionResponse | V2.ResumeSessionResponse }, E>
+    request: (routeKey: string) => Effect.Effect<{ readonly sessionId: string; readonly result: V1.NewSessionResponse | V1.LoadSessionResponse | V1.ResumeSessionResponse | V2.NewSessionResponse | V2.ResumeSessionResponse }, E>
   ) {
     // For `session/new` the id is not known until the response, so routing is
     // keyed on a placeholder until the live route can be committed.
@@ -850,13 +850,9 @@ const connect = Effect.fnUntraced(function*(options: ConnectOptions) {
     let promoted = false
     let candidateScope: Scope.Closeable | undefined
     return yield* Effect.gen(function*() {
-      // The connection inserts this marker between notifications before and
-      // after the lifecycle response, even when they share a JSON-RPC batch.
-      // After it, subsequent updates may safely reach the prior live runtime.
-      const onResponseBoundary = Semaphore.withPermit(routingLock, Effect.sync(() => {
-        if (routes.get(routeKey) === provisional) provisional.replayHistory = false
-      }))
-      const outcome = yield* Effect.exit(request(routeKey, onResponseBoundary).pipe(Effect.ensuring(Effect.ignore(connection.drainNotifications))))
+      // Drain notifications already queued before promoting the candidate or
+      // restoring the prior route. Explicit replay remains isolated here.
+      const outcome = yield* Effect.exit(request(routeKey).pipe(Effect.ensuring(Effect.ignore(connection.drainNotifications))))
       if (Exit.isFailure(outcome)) return yield* Effect.failCause(outcome.cause)
       const { result, sessionId } = outcome.value
 
@@ -955,11 +951,11 @@ const connect = Effect.fnUntraced(function*(options: ConnectOptions) {
         ...(version === 2 && sessionOptions.replayFrom !== undefined ? { replayFrom: sessionOptions.replayFrom } : {}) }
       return yield* establish(sessionOptions.sessionId, sessionOptions.cwd,
         version === 1 ? operation === "session/load" : sessionOptions.replayFrom !== undefined && sessionOptions.replayFrom !== null,
-        (_routeKey, onResponseBoundary) => Effect.gen(function*() {
+        () => Effect.gen(function*() {
           const invalid = (cause: Schema.SchemaError) => new AcpProtocolError({ message: "Invalid session resume params", cause })
           const result = version === 2
-            ? yield* request(V2.agentMethods["session/resume"], yield* Schema.decodeUnknownEffect(V2.ResumeSessionRequest)(input).pipe(Effect.mapError(invalid)), { onResponseBoundary })
-            : yield* request(V1.agentMethods[operation], yield* Schema.decodeUnknownEffect(V1.agentMethods[operation].params)(input).pipe(Effect.mapError(invalid)), { onResponseBoundary })
+            ? yield* request(V2.agentMethods["session/resume"], yield* Schema.decodeUnknownEffect(V2.ResumeSessionRequest)(input).pipe(Effect.mapError(invalid)))
+            : yield* request(V1.agentMethods[operation], yield* Schema.decodeUnknownEffect(V1.agentMethods[operation].params)(input).pipe(Effect.mapError(invalid)))
           return { sessionId: sessionOptions.sessionId, result }
         }))
     }))
