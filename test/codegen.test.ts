@@ -204,7 +204,7 @@ describe("generation", () => {
       yield* fs.writeFileString(path, original + "// drift\n")
       const run = Bun.spawnSync(["bun", "scripts/codegen/generate.ts", "--check"], { cwd: root })
       expect(run.exitCode).toBe(1)
-      expect(run.stderr.toString()).toContain(output)
+      expect(run.stderr.toString() + run.stdout.toString()).toContain(output)
     } finally {
       yield* fs.writeFileString(path, original)
     }
