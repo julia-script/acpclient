@@ -93,7 +93,11 @@ const str = (u: unknown): string => {
   return encoded.success
 }
 const indent = (s: string, by = "  ") => s.split("\n").join(`\n${by}`)
-const propertyKey = (k: string) => (/^[A-Za-z_$][\w$]*$/.test(k) ? k : str(k))
+const propertyKey = (k: string) => {
+  if (k === "__proto__") return `[${str(k)}]`
+  return /^[A-Za-z_$][\w$]*$/.test(k) ? k : str(k)
+}
+const methodKey = (k: string) => k === "__proto__" ? propertyKey(k) : str(k)
 
 class Emitter {
   constructor(readonly definitions: Readonly<Record<string, unknown>>, readonly definition: string) {}
@@ -146,7 +150,7 @@ class Emitter {
 
   ref(ref: string): Emitted {
     const match = /^#\/\$defs\/([A-Za-z_][\w]*)$/.exec(ref)
-    if (!match || !(match[1]! in this.definitions)) this.fail("$ref", ref)
+    if (!match || !Object.hasOwn(this.definitions, match[1]!)) this.fail("$ref", ref)
     const name = match[1]!
     const definition = this.definitions[name]
     const unconstrained = isNode(definition) && Object.keys(definition).every((key) => annotationKeywords.has(key) || key.startsWith("x-"))
@@ -239,10 +243,10 @@ class Emitter {
     }
     if (keys.length === 0) return { ts: "{ readonly [key: string]: unknown }", schema: "Wire.object({})" }
     const fields = keys.map((key) => {
-      const value = key in properties ? this.node(properties[key]) : { ts: "unknown", schema: "Schema.Unknown" }
+      const value = Object.hasOwn(properties, key) ? this.node(properties[key]) : { ts: "unknown", schema: "Schema.Unknown" }
       const optional = !required.has(key)
       return {
-        ts: `${docComment(properties[key])}readonly ${propertyKey(key)}${optional ? "?" : ""}: ${value.ts}`,
+        ts: `${docComment(Object.hasOwn(properties, key) ? properties[key] : undefined)}readonly ${propertyKey(key)}${optional ? "?" : ""}: ${value.ts}`,
         schema: `${propertyKey(key)}: ${optional ? `Schema.optionalKey(${value.schema})` : value.schema}`
       }
     })
@@ -308,8 +312,8 @@ interface MethodEntry {
 }
 
 const envelopeRefs = (definitions: Readonly<Record<string, unknown>>, name: string): ReadonlySet<string> => {
+  if (!Object.hasOwn(definitions, name)) throw new UnsupportedSchemaError(name, "$defs", "missing JSON-RPC envelope definition")
   const def = definitions[name]
-  if (def === undefined) throw new UnsupportedSchemaError(name, "$defs", "missing JSON-RPC envelope definition")
   return references(def)
 }
 
@@ -364,7 +368,7 @@ const emitModuleUnsafe = (document: JsonSchemaDocument, options: EmitOptions): s
   const definitions = document.$defs
   const overrides = (options.overrides ?? defaultOverrides)[input.version] ?? {}
   for (const name of Object.keys(overrides)) {
-    if (!(name in definitions)) throw new UnknownOverrideError(name, input.version)
+    if (!Object.hasOwn(definitions, name)) throw new UnknownOverrideError(name, input.version)
   }
   const out: Array<string> = []
   out.push(
@@ -394,7 +398,7 @@ const emitModuleUnsafe = (document: JsonSchemaDocument, options: EmitOptions): s
   )
   for (const name of orderDefinitions(definitions)) {
     if (reserved.has(name)) throw new UnsupportedSchemaError(name, "$defs", "definition name collides with a generated export")
-    const override = overrides[name]
+    const override = Object.hasOwn(overrides, name) ? overrides[name] : undefined
     const emitted = override ?? new Emitter(definitions, name).node(definitions[name])
     const doc = docComment(definitions[name])
     out.push(
@@ -412,8 +416,8 @@ const emitModuleUnsafe = (document: JsonSchemaDocument, options: EmitOptions): s
     out.push(
       entries.map((m) =>
         m.kind === "request"
-          ? `  ${str(m.method)}: AcpSchema.request(${str(m.method)}, ${m.params}, ${m.result})`
-          : `  ${str(m.method)}: AcpSchema.notification(${str(m.method)}, ${m.params})`
+          ? `  ${methodKey(m.method)}: AcpSchema.request(${str(m.method)}, ${m.params}, ${m.result})`
+          : `  ${methodKey(m.method)}: AcpSchema.notification(${str(m.method)}, ${m.params})`
       ).join(",\n"),
       `} as const`
     )

@@ -525,7 +525,7 @@ const connect = Effect.fnUntraced(function*(options: ConnectOptions) {
     const methods: Readonly<Record<string, import("./AcpSchema.ts").Method>> = AcpProtocol.schemas[version].clientMethods
     return {
       request: (method, params, context) => {
-        const descriptor = methods[method]
+        const descriptor = Object.hasOwn(methods, method) ? methods[method] : undefined
         if (descriptor?._tag !== "Request") return dispatch.request?.(method, params, context)
         return Schema.decodeUnknownEffect(descriptor.params)(params).pipe(
           Effect.mapError(() => new AcpRemoteError({ code: ErrorCode.InvalidParams, message: "Invalid client request" })),
@@ -534,7 +534,7 @@ const connect = Effect.fnUntraced(function*(options: ConnectOptions) {
           Effect.mapError((error) => Schema.is(AcpRemoteError)(error) ? error : new AcpRemoteError({ code: ErrorCode.InternalError, message: "Invalid client response" })))
       },
       notification: (method, params) => {
-        const descriptor = methods[method]
+        const descriptor = Object.hasOwn(methods, method) ? methods[method] : undefined
         return descriptor?._tag === "Notification" ? Schema.decodeUnknownEffect(descriptor.params)(params).pipe(
           Effect.flatMap((decoded) => dispatch.notification?.(method, decoded) ?? Effect.void), Effect.ignore) : dispatch.notification?.(method, params)
       }
@@ -760,7 +760,7 @@ const connect = Effect.fnUntraced(function*(options: ConnectOptions) {
       resolveInteraction: (interactionId, resolution) =>
         Effect.gen(function*() {
           const snapshot = yield* runtime.current
-          const interaction = snapshot.interactions[interactionId]
+          const interaction = Object.hasOwn(snapshot.interactions, interactionId) ? snapshot.interactions[interactionId] : undefined
           if (interaction === undefined || interaction.status !== "pending") {
             return yield* interaction?.status === "expired"
               ? new AcpInteractionExpired({ interactionId })

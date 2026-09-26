@@ -73,6 +73,18 @@ describe("v2 messages", () => {
 })
 
 describe("v2 tool calls", () => {
+  test("prototype-named tool calls start fresh and retain their chunks", () => {
+    for (const id of ["constructor", "toString", "__proto__"]) {
+      const next = State.reduceAll(v2(), [
+        update({ sessionUpdate: "tool_call_update", toolCallId: id, title: "Run" }),
+        update({ sessionUpdate: "tool_call_content_chunk", toolCallId: id, content: { type: "content", content: text("done") } })
+      ])
+      expect(Object.hasOwn(next.toolCalls, id)).toBe(true)
+      expect(next.toolCalls[id]).toMatchObject({ toolCallId: id, title: "Run", content: [{ type: "content", content: text("done") }] })
+      expect(Object.getPrototypeOf(next.toolCalls)).toBe(Object.prototype)
+    }
+  })
+
   test("omitted fields are unchanged, null clears, values replace", () => {
     const seeded = State.reduce(
       v2(),
@@ -117,6 +129,29 @@ describe("v2 tool calls", () => {
 
 describe("v2 terminals", () => {
   const base64 = (value: string) => btoa(value)
+
+  test("prototype-named terminals keep decoded output", () => {
+    for (const id of ["constructor", "toString", "__proto__"]) {
+      const next = State.reduceAll(v2(), [
+        update({ sessionUpdate: "terminal_update", terminalId: id, output: { data: base64("A") } }),
+        update({ sessionUpdate: "terminal_output_chunk", terminalId: id, data: base64("B") })
+      ])
+      expect(Object.hasOwn(next.terminals, id)).toBe(true)
+      expect(next.terminals[id]!.outputBytes).toEqual([65, 66])
+      expect(Object.getPrototypeOf(next.terminals)).toBe(Object.prototype)
+    }
+  })
+
+  test("base64 keeps accepted unpadded and whitespace forms and ignores invalid chunks", () => {
+    const next = State.reduceAll(v2(), [
+      update({ sessionUpdate: "terminal_update", terminalId: "term-1", output: { data: " Y Q = = " } }),
+      update({ sessionUpdate: "terminal_output_chunk", terminalId: "term-1", data: "Yg" }),
+      update({ sessionUpdate: "terminal_output_chunk", terminalId: "term-1", data: "invalid!" }),
+      update({ sessionUpdate: "terminal_output_chunk", terminalId: "term-1", data: "/w==" })
+    ])
+    expect(next.terminals["term-1"]!.outputBytes).toEqual([97, 98, 255])
+    expect(next.raw).toHaveLength(4)
+  })
 
   // Spec: "Terminal snapshot and byte chunks".
   test("a replacement snapshot replaces output, then chunks append decoded bytes", () => {
@@ -200,6 +235,17 @@ describe("v2 plans, commands, config, usage, info", () => {
       update({ sessionUpdate: "config_option_update", configOptions: [{ configId: "depth", name: "Depth", type: "boolean", currentValue: false }] })
     ])
     expect(Object.keys(next.config)).toEqual(["depth"])
+  })
+
+  test("prototype-named config options are own entries", () => {
+    for (const id of ["constructor", "toString", "__proto__"]) {
+      const next = State.reduce(v2(), update({ sessionUpdate: "config_option_update", configOptions: [
+        { configId: id, name: "Mode", type: "boolean", currentValue: false }
+      ] }))
+      expect(Object.keys(next.config)).toEqual([id])
+      expect(next.config[id]!.key).toBe(id)
+      expect(Object.getPrototypeOf(next.config)).toBe(Object.prototype)
+    }
   })
 
   test("usage and session info are projected", () => {
@@ -331,6 +377,18 @@ describe("v1 adaptation", () => {
 })
 
 describe("submissions", () => {
+  test("prototype-named submission IDs update only registered entries", () => {
+    for (const id of ["constructor", "toString", "__proto__"]) {
+      const missing = State.reduce(v2(), { _tag: "submissionDispatched", id, requestId: 7 })
+      expect(Object.hasOwn(missing.submissions, id)).toBe(false)
+      const next = State.reduceAll(v2(), [
+        { _tag: "submissionRegistered", submission: submission(id) },
+        { _tag: "submissionDispatched", id, requestId: 7 }
+      ])
+      expect(next.submissions[id]).toMatchObject({ id, status: { _tag: "dispatched" }, requestId: 7 })
+      expect(Object.getPrototypeOf(next.submissions)).toBe(Object.prototype)
+    }
+  })
   test("v2 acceptance records the agent message id without completing foreground", () => {
     const next = State.reduceAll(v2(), [
       { _tag: "submissionRegistered", submission: submission("s-1") },
@@ -451,6 +509,20 @@ describe("interactions", () => {
     resolvedAt: null
   }
 
+  test("prototype-named interactions settle only after they are created", () => {
+    for (const id of ["constructor", "toString", "__proto__"]) {
+      const missing = State.reduce(v2(), { _tag: "interactionSettled", interactionId: id, status: "resolved", outcome: { outcome: { outcome: "cancelled" } } })
+      expect(Object.hasOwn(missing.interactions, id)).toBe(false)
+      const next = State.reduceAll(v2(), [
+        { _tag: "interactionCreated", interaction: { ...pending, interactionId: id } },
+        { _tag: "interactionSettled", interactionId: id, status: "resolved", outcome: { outcome: { outcome: "cancelled" } } }
+      ])
+      expect(Object.hasOwn(next.interactions, id)).toBe(true)
+      expect(next.interactions[id]!.status).toBe("resolved")
+      expect(Object.getPrototypeOf(next.interactions)).toBe(Object.prototype)
+    }
+  })
+
   test("settling records the outcome and resolution point", () => {
     const next = State.reduceAll(v2(), [
       { _tag: "interactionCreated", interaction: pending },
@@ -493,6 +565,32 @@ describe("cancellation", () => {
 })
 
 describe("retention bounds", () => {
+  test("record caps retain a prototype-named newest key as data", () => {
+    const next = State.reduceAll(v2(), [
+      update({ sessionUpdate: "tool_call_update", toolCallId: "old" }),
+      update({ sessionUpdate: "tool_call_update", toolCallId: "__proto__" }),
+      update({ sessionUpdate: "plan_update", plan: { type: "items", planId: "old", entries: [] } }),
+      update({ sessionUpdate: "plan_update", plan: { type: "items", planId: "__proto__", entries: [] } })
+    ], { ...defaultContentLimits, toolCalls: 1, plans: 1 })
+    for (const record of [next.toolCalls, next.plans]) {
+      expect(Object.keys(record)).toEqual(["__proto__"])
+      expect(Object.getPrototypeOf(record)).toBe(Object.prototype)
+    }
+  })
+
+  test("interaction cap retains a prototype-named pending key as data", () => {
+    const interaction = (interactionId: string) => ({
+      interactionId, kind: "permission" as const, version: 2 as const, status: "pending" as const,
+      request: { sessionId: "s", title: "Edit", options: [] }, outcome: null, createdAt: 1, resolvedAt: null
+    })
+    const next = State.reduceAll(v2(), [
+      { _tag: "interactionCreated", interaction: interaction("old") },
+      { _tag: "interactionSettled", interactionId: "old", status: "resolved", outcome: { outcome: { outcome: "cancelled" } } },
+      { _tag: "interactionCreated", interaction: interaction("__proto__") }
+    ], { ...defaultContentLimits, interactions: 1 })
+    expect(Object.keys(next.interactions)).toEqual(["__proto__"])
+    expect(Object.getPrototypeOf(next.interactions)).toBe(Object.prototype)
+  })
   test("messages beyond the budget are evicted oldest-first and reported", () => {
     const limits = { ...defaultContentLimits, messages: 3 }
     const next = State.reduceAll(

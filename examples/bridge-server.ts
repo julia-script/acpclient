@@ -32,6 +32,9 @@ import { AcpProtocol, V1, V2 } from "effect-acp"
 import * as BridgeHttp from "effect-acp/server"
 import * as WebSocket from "effect-acp/transport/WebSocket"
 
+export const resolveLaunchProfile = <A>(profiles: Readonly<Record<string, A>>, profile: string | undefined): A | undefined =>
+  profile !== undefined && Object.hasOwn(profiles, profile) ? profiles[profile] : undefined
+
 const run = (version: 1 | 2) => {
   const port = 8317
   const agentPath = new URL("../test/fixtures/agent.ts", import.meta.url).pathname
@@ -55,7 +58,7 @@ const run = (version: 1 | 2) => {
     allowOrigin: (origin) => origin === undefined || origin === `http://localhost:${port}`,
     // The browser selects a profile name, never a command line.
     resolveLaunch: (_principal, selection) => {
-      const command = selection.profile === undefined ? undefined : launchProfiles[selection.profile]
+      const command = resolveLaunchProfile(launchProfiles, selection.profile)
       return command === undefined
         ? Effect.fail(new BridgeHttp.Rejected({ message: `unknown launch profile ${selection.profile}` }))
         : Effect.succeed(command)

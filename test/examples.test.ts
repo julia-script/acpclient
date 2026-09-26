@@ -1,6 +1,7 @@
 import * as Effect from "effect/Effect"
 import { expect, test } from "bun:test"
 import * as Path from "effect/Path"
+import { resolveLaunchProfile } from "../examples/bridge-server.ts"
 
 const path = Effect.runSync(Effect.provide(Path.Path, Path.layer))
 const join = (...segments: string[]) => path.join(...segments)
@@ -8,6 +9,15 @@ const join = (...segments: string[]) => path.join(...segments)
 const root = join(import.meta.dir, "..")
 const runExample = (file: string, args: ReadonlyArray<string> = []) =>
   Bun.spawnSync(["bun", join(root, "examples", file), ...args], { cwd: root, timeout: 20_000 })
+
+test("bridge example resolves only own launch profiles", () => {
+  const command = { name: "demo" }
+  const profiles = { demo: command }
+  expect(resolveLaunchProfile(profiles, "demo")).toBe(command)
+  for (const name of ["constructor", "toString", "__proto__"]) {
+    expect(resolveLaunchProfile(profiles, name)).toBeUndefined()
+  }
+})
 
 test("stdio example negotiates v2 and prompts", () => {
   const result = runExample("stdio-client.ts")

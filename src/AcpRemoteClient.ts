@@ -101,7 +101,7 @@ export const make = (gateway: Client, options: Options) => Effect.gen(function*(
     const waitFor = (id: string, terminal: boolean): Effect.Effect<SubmissionSnapshot, OperationError> => Effect.scoped(Effect.gen(function*() {
       const observed = yield* observe
       const matches = (state: SessionSnapshot) => {
-        const sub = state.submissions[id]
+        const sub = Object.hasOwn(state.submissions, id) ? state.submissions[id] : undefined
         return sub && (!terminal || ["completed", "failed"].includes(sub.status._tag)) ? sub : undefined
       }
       const current = matches(observed.snapshot)
@@ -143,7 +143,7 @@ export const make = (gateway: Client, options: Options) => Effect.gen(function*(
           return accepted.agentMessageId
         })).pipe(Effect.forkIn(owned))
         return { id: result.submissionId,
-          snapshot: Effect.sync(() => { latest = snapshot!.submissions[result.submissionId] ?? latest; return latest }),
+          snapshot: Effect.sync(() => { latest = Object.hasOwn(snapshot!.submissions, result.submissionId) ? snapshot!.submissions[result.submissionId]! : latest; return latest }),
           accepted: Deferred.await(accepted), outcome: Deferred.await(finished) }
 
       }),

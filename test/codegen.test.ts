@@ -96,6 +96,37 @@ describe("generation", () => {
     expect(Result.isSuccess(emit({}))).toBe(true)
   })
 
+  test("schema names and property keys never resolve through prototypes", () => {
+    const missing = emit({ Ref: { $ref: "#/$defs/toString" } })
+    expect(Result.isFailure(missing)).toBe(true)
+    if (Result.isSuccess(missing)) throw new Error("Expected unknown reference")
+    expect(missing.failure).toMatchObject({ _tag: "UnsupportedSchemaError", definition: "Ref", construct: "$ref" })
+
+    const names = emit(Object.fromEntries([
+      ["constructor", { type: "string" }],
+      ["toString", { type: "string" }],
+      ["__proto__", { type: "object", properties: Object.fromEntries([["__proto__", { type: "string" }]]) }],
+      ["Required", { type: "object", required: ["constructor"] }],
+      ["Ref", { $ref: "#/$defs/constructor" }]
+    ]))
+    expect(Result.isSuccess(names)).toBe(true)
+    if (Result.isFailure(names)) throw names.failure
+    expect(names.success).toContain("readonly constructor: unknown")
+    expect(names.success).toContain("readonly [\"__proto__\"]?: string")
+    expect(names.success).toContain("[\"__proto__\"]: Schema.optionalKey(Schema.String)")
+    expect(names.success).toContain("export const Ref = Wire.def<Ref>(\"Ref\", constructor)")
+
+    const method = emit({
+      ClientRequest: { $ref: "#/$defs/Request" },
+      AgentResponse: { $ref: "#/$defs/Response" },
+      Request: { type: "object", "x-method": "__proto__", "x-side": "client" },
+      Response: { type: "object", "x-method": "__proto__", "x-side": "client" }
+    })
+    expect(Result.isSuccess(method)).toBe(true)
+    if (Result.isFailure(method)) throw method.failure
+    expect(method.success).toContain("[\"__proto__\"]: AcpSchema.request(\"__proto__\", Request, Response)")
+  })
+
   test("a stale override is a typed diagnostic with its definition and version", () => {
     const result = emitModule({ $defs: envelopes }, {
       manifest: { generator: "t", upstream: { repository: "t", revision: "t" } },
