@@ -19,17 +19,26 @@ export interface Storage<SaveError = AcpGateway.GatewayError> {
   readonly save: (key: string, value: unknown) => Effect.Effect<void, SaveError>
   readonly remove: (key: string) => Effect.Effect<void>
 }
+class StorageCloneFailure extends Schema.TaggedError<StorageCloneFailure>()("StorageCloneFailure", {
+  cause: Schema.Defect()
+}) {}
+
 export const memoryStorage = (): Storage => {
   const values = new Map<string, unknown>()
   return {
     load: (key) => Effect.sync(() => values.get(key)),
     save: (key, value) => Effect.try({
       try: () => structuredClone(value),
-      catch: (cause) => new AcpGateway.GatewayError({
-        code: "Invalid",
-        message: `Failed to save gateway state at ${key}: ${String(cause)}`
-      })
-    }).pipe(Effect.flatMap((cloned) => Effect.sync(() => { values.set(key, cloned) }))),
+      catch: (cause) => new StorageCloneFailure({ cause })
+    }).pipe(
+      Effect.catch((failure) => failure.cause instanceof DOMException && failure.cause.name === "DataCloneError"
+        ? Effect.fail(new AcpGateway.GatewayError({
+          code: "Invalid",
+          message: `Failed to save gateway state at ${key}: ${String(failure.cause)}`
+        }))
+        : Effect.die(failure.cause)),
+      Effect.flatMap((cloned) => Effect.sync(() => { values.set(key, cloned) }))
+    ),
     remove: (key) => Effect.sync(() => { values.delete(key) })
   }
 }
