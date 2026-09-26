@@ -164,7 +164,7 @@ describe("generation", () => {
     yield* fs.writeFileString(join(dir, "stale.ts"), "old")
     const error = yield* failure(applyGenerated([
       { output: "stale.ts", source: "new" },
-      { output: "missing.ts", source: "new" }
+      { output: "missing.ts", source: "" }
     ], true, dir))
     expect(error).toBeInstanceOf(GeneratedSchemaDrift)
     expect(error).toMatchObject({ outputs: ["stale.ts", "missing.ts"] })

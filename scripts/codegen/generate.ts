@@ -39,8 +39,8 @@ export const applyGenerated = (
   for (const { output, source } of outputs) {
     const file = path.join(base, output)
     if (check) {
-      const current = (yield* fs.exists(file)) ? yield* fs.readFileString(file) : ""
-      if (current !== source) drifted.push(output)
+      const exists = yield* fs.exists(file)
+      if (!exists || (yield* fs.readFileString(file)) !== source) drifted.push(output)
     } else {
       yield* fs.writeFileString(file, source)
       yield* Effect.log(`wrote ${output}`)
