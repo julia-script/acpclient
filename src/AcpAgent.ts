@@ -573,11 +573,13 @@ export const make = <R = never>(options: Options<R>): AcpAgent<R> => {
           // leaving the session running forever. Interruption (cancellation)
           // passes through, so its own completion signal is emitted instead.
           const stopReason = yield* options.prompt.execute({ ...context, prompt, messageId, emit, client }).pipe(
-            Effect.catchCause((cause) =>
-              Cause.hasInterrupts(cause)
-                ? Effect.failCause(Cause.fromReasons<never>(cause.reasons.filter(Cause.isInterruptReason)))
-                : Effect.andThen(Effect.logError("Agent execution failed"), Effect.succeed<StopReason>("refusal"))
-            )
+            Effect.catchCause((cause) => {
+              if (Cause.hasInterruptsOnly(cause)) return Effect.failCause(cause)
+              if (Cause.hasInterrupts(cause)) {
+                return Effect.andThen(Effect.logError("Agent execution failed", cause), Effect.failCause(cause))
+              }
+              return Effect.andThen(Effect.logError("Agent execution failed"), Effect.succeed<StopReason>("refusal"))
+            })
           )
           // Final updates precede the idle signal.
           yield* emitIdle(context.sessionId, context.version, stopReason)
@@ -618,9 +620,12 @@ export const make = <R = never>(options: Options<R>): AcpAgent<R> => {
           const started = yield* Deferred.make<void>()
           const completed = yield* Deferred.make<StopReason, HandlerError>()
           const work = Deferred.await(started).pipe(Effect.andThen(execute(context, request.prompt, inserted.messageId)),
-            Effect.catchCause((cause) => state.cancelled ? Effect.succeed<StopReason>("cancelled") : Effect.failCause(cause)),
+            Effect.catchCauseIf((cause) => state.cancelled && Cause.hasInterruptsOnly(cause),
+              () => Effect.succeed<StopReason>("cancelled")),
             Effect.ensuring(Effect.sync(() => { state.running = undefined })),
-            Effect.onExit((exit) => state.cancelled ? Deferred.succeed(completed, "cancelled") : Deferred.done(completed, exit)))
+            Effect.onExit((exit) => state.cancelled && Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)
+              ? Deferred.succeed(completed, "cancelled")
+              : Deferred.done(completed, exit)))
           const fiber = yield* Effect.forkIn(Effect.interruptible(work), state.scope)
           state.running = fiber
           state.inserting = false

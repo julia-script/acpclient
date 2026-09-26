@@ -607,6 +607,31 @@ for (const method of ["session/close", "session/delete"] as const) {
   })))
 }
 
+test("v1 close does not turn an interruption-time defect into cancellation", () => run(Effect.gen(function*() {
+  const started = yield* Deferred.make<void>()
+  const agent = AcpAgent.make({ ...baseOptions(), session: {
+    create: () => Effect.succeed({ sessionId: "s-1" }),
+    close: () => Effect.void
+  }, prompt: {
+    insert: () => Effect.succeed({ messageId: "m" }),
+    execute: () => Deferred.succeed(started, undefined).pipe(
+      Effect.andThen(Effect.never),
+      Effect.onInterrupt(() => Effect.die(new Error("private defect")))
+    )
+  } })
+  const peer = yield* connect(agent)
+  yield* peer.send(initialize(1)); yield* peer.next
+  yield* peer.send({ jsonrpc: "2.0", id: 1, method: "session/new", params: { cwd: "/tmp", mcpServers: [] } }); yield* peer.next
+  yield* peer.send({ jsonrpc: "2.0", id: 2, method: "session/prompt", params: { sessionId: "s-1", prompt: [] } })
+  yield* Deferred.await(started)
+  yield* peer.send({ jsonrpc: "2.0", id: 3, method: "session/close", params: { sessionId: "s-1" } })
+  const replies = [yield* peer.next, yield* peer.next]
+  expect(replies).toEqual(expect.arrayContaining([
+    expect.objectContaining({ id: 2, error: { code: -32603, message: "Internal error" } }),
+    expect.objectContaining({ id: 3, result: {} })
+  ]))
+})))
+
 test("store appends chunks without losing previous chunks or replacement content", () => run(Effect.gen(function*() {
   const store = yield* Store.Store
   yield* store.create({ sessionId: "s", cwd: "/tmp" })
