@@ -918,28 +918,30 @@ describe("provisional routing bounds", () => {
     })))
 
   for (const version of [1, 2] as const) {
-    test(`v${version} failed history replay keeps only fresh updates on the prior route`, () =>
-      run(Effect.gen(function*() {
-        const { agent, connection, session } = yield* withSession(version, resumeOptions(version))
-        const observed = yield* session.observe
-        if (version === 2) {
-          // State updates are retained in raw, but are not conversation history.
-          yield* agent.update("sess-1", { sessionUpdate: "state_update", state: "idle" })
-        }
-        yield* agent.update("sess-1", { sessionUpdate: "agent_message_chunk", ...(version === 2 ? { messageId: "history" } : {}), content: text("history") })
-        yield* Stream.runCollect(Stream.take(Stream.filter(observed.changes, (event) => hasText(event.snapshot, "history")), 1))
+    for (const cursor of version === 2 ? ["start", "_cursor"] as const : ["start"] as const) {
+      test(`v${version} failed ${cursor} replay keeps only fresh updates on the prior route`, () =>
+        run(Effect.gen(function*() {
+          const { agent, connection, session } = yield* withSession(version, resumeOptions(version))
+          const observed = yield* session.observe
+          if (version === 2) {
+            // State updates are retained in raw, but are not conversation history.
+            yield* agent.update("sess-1", { sessionUpdate: "state_update", state: "idle" })
+          }
+          yield* agent.update("sess-1", { sessionUpdate: "agent_message_chunk", ...(version === 2 ? { messageId: "history" } : {}), content: text("history") })
+          yield* Stream.runCollect(Stream.take(Stream.filter(observed.changes, (event) => hasText(event.snapshot, "history")), 1))
 
-        const resuming = yield* Effect.forkChild(connection.resumeSession({ sessionId: "sess-1", cwd: "/work", replayFrom: { type: "start" } }))
-        const method = version === 1 ? "session/load" : "session/resume"
-        yield* agent.awaitRequest(method)
-        yield* agent.update("sess-1", { sessionUpdate: "agent_message_chunk", ...(version === 2 ? { messageId: "history" } : {}), content: text("history") })
-        yield* agent.update("sess-1", { sessionUpdate: "agent_message_chunk", ...(version === 2 ? { messageId: "fresh" } : {}), content: text("fresh") })
-        yield* agent.respondError(method, -32603, "replay failed")
-        expect(causeOf(yield* Fiber.await(resuming))).toContain("replay failed")
-        const content = (yield* session.snapshot).messages.flatMap((message) => message.content)
-        expect(content.filter((part) => "text" in part && part.text === "history")).toHaveLength(1)
-        expect(content.filter((part) => "text" in part && part.text === "fresh")).toHaveLength(1)
-      })))
+          const resuming = yield* Effect.forkChild(connection.resumeSession({ sessionId: "sess-1", cwd: "/work", replayFrom: { type: cursor } }))
+          const method = version === 1 ? "session/load" : "session/resume"
+          yield* agent.awaitRequest(method)
+          yield* agent.update("sess-1", { sessionUpdate: "agent_message_chunk", ...(version === 2 ? { messageId: "history" } : {}), content: text("history") })
+          yield* agent.update("sess-1", { sessionUpdate: "agent_message_chunk", ...(version === 2 ? { messageId: "fresh" } : {}), content: text("fresh") })
+          yield* agent.respondError(method, -32603, "replay failed")
+          expect(causeOf(yield* Fiber.await(resuming))).toContain("replay failed")
+          const content = (yield* session.snapshot).messages.flatMap((message) => message.content)
+          expect(content.filter((part) => "text" in part && part.text === "history")).toHaveLength(1)
+          expect(content.filter((part) => "text" in part && part.text === "fresh")).toHaveLength(1)
+        })))
+    }
 
     test(`v${version} failed resume keeps the prior route and live events`, () =>
       run(Effect.gen(function*() {

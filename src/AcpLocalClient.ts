@@ -965,7 +965,7 @@ const connect = Effect.fnUntraced(function*(options: ConnectOptions) {
         mcpServers: sessionOptions.mcpServers ?? [],
         ...(version === 2 && sessionOptions.replayFrom !== undefined ? { replayFrom: sessionOptions.replayFrom } : {}) }
       return yield* establish(sessionOptions.sessionId, sessionOptions.cwd,
-        version === 1 ? operation === "session/load" : sessionOptions.replayFrom?.type === "start",
+        version === 1 ? operation === "session/load" : sessionOptions.replayFrom !== undefined && sessionOptions.replayFrom !== null,
         () => Effect.gen(function*() {
           const invalid = (cause: Schema.SchemaError) => new AcpProtocolError({ message: "Invalid session resume params", cause })
           const result = version === 2
