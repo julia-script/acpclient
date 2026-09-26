@@ -275,7 +275,7 @@ export const make = <R, E>(options: Options<R, E>) => Effect.gen(function*() {
         const submission = yield* session.handle.submit(command.prompt)
         progress({ submissionId: submission.id, agentMessageId: null, acceptanceUnavailable: session.handle.version === 1 })
         const accepted = yield* Effect.exit(session.handle.version === 1 ? Effect.as(submission.outcome, null) : submission.accepted)
-        if (Exit.isFailure(accepted) && session.handle.version === 2) return yield* Effect.failCause(accepted.cause)
+        if (Exit.isFailure(accepted)) return yield* Effect.failCause(accepted.cause)
         return { submissionId: submission.id, agentMessageId: Exit.isSuccess(accepted) ? accepted.value : null, acceptanceUnavailable: session.handle.version === 1 }
       }
       case "Cancel": return yield* session.handle.cancel

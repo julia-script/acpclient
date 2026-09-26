@@ -136,6 +136,36 @@ test("ACP loss before acknowledgement retains an uncertain outcome without anoth
   expect((yield* h.agent.received).filter((message) => message.method === "session/prompt")).toHaveLength(1)
 })))
 
+for (const version of [1, 2] as const) {
+  test(`v${version} host submission leaves admitted state when its local owner closes`, () => run(Effect.gen(function*() {
+    const ownerScope = yield* Scope.make()
+    const settled = yield* Deferred.make<void>()
+    const h = yield* hostedHarness(version, {
+      ownerScope,
+      policy: { commands: 3, retryMs: 100 },
+      onLifecycle: (event) => event.type === "settled" && event.commands === 3
+        ? Deferred.succeed(settled, undefined).pipe(Effect.asVoid)
+        : Effect.void
+    })
+    const handle = yield* h.connection.newSession({ cwd: "/work" })
+    const submission = yield* handle.submit([{ type: "text", text: "held" }])
+    const outcome = yield* Effect.exit(submission.outcome).pipe(Effect.forkChild)
+    yield* h.agent.awaitRequest("session/prompt")
+    const pending = yield* h.gateway.pendingOperations
+    const operationId = pending[pending.length - 1]!
+    expect((yield* h.host.operation(identity, { window: h.gateway.window, operationId })).status).toBe("admitted")
+    yield* Scope.close(ownerScope, Exit.void)
+    yield* Deferred.await(settled)
+    expect((yield* h.host.operation(identity, { window: h.gateway.window, operationId })).status).toBe("outcomeUnknown")
+    expect(Exit.isFailure(yield* Fiber.join(outcome))).toBe(true)
+    // The ledger retains terminal records for retries, then reclaims their slots.
+    yield* Effect.sleep("110 millis")
+    const nextWindow = yield* h.host.hello(identity, { version: AcpGateway.version, workspace: "work", clientId: "after-close" })
+    const next = yield* h.host.admit(identity, { window: nextWindow, operationId: "next", command: { _tag: "Open", profile: "next", options: null } })
+    expect(next.status).toBe("admitted")
+  })))
+}
+
 test("detached interactions expire as cancellation, never approval", () => run(Effect.gen(function*() {
   const h = yield* hostedHarness(2, { policy: { interactionMs: 25 } })
   const handle = yield* h.connection.newSession({ cwd: "/work" })

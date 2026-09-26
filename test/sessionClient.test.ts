@@ -74,6 +74,19 @@ for (const version of [1, 2] as const) {
       : { capabilities: { auth: { terminal: {} } } }
     })
   })))
+
+  test(`v${version} completed submission stays successful after owner closure`, () => run(Effect.gen(function*() {
+    const owner = yield* Scope.make()
+    const { agent, session } = yield* Scope.provide(withSession(version), owner)
+    const submission = yield* session.submit([text("done")])
+    yield* agent.awaitRequest("session/prompt")
+    yield* completePrompt(agent, version)
+    expect((yield* submission.outcome).status).toEqual({ _tag: "completed" })
+    yield* Scope.close(owner, Exit.void)
+    expect((yield* submission.outcome).status).toEqual({ _tag: "completed" })
+    if (version === 1) expect(causeOf(yield* Effect.exit(submission.accepted))).toContain("AcpCapabilityUnsupported")
+    else expect(yield* submission.accepted).toBe("m-1")
+  })))
 }
 
 const text = (value: string) => ({ type: "text" as const, text: value })
@@ -99,6 +112,37 @@ const causeOf = (exit: Exit.Exit<unknown, unknown>) =>
 
 /** A prompt-response body appropriate to the version. */
 const promptResult = (version: 1 | 2) => version === 2 ? { messageId: "m-1" } : { stopReason: "end_turn" }
+
+for (const version of [1, 2] as const) {
+  test(`v${version} external submission waiters settle when the owning scope closes before a prompt reply`, () => run(Effect.gen(function*() {
+    const owner = yield* Scope.make()
+    const { agent, session } = yield* Scope.provide(withSession(version), owner)
+    const submission = yield* session.submit([text("held")])
+    const accepted = yield* Effect.exit(submission.accepted).pipe(Effect.forkChild)
+    const outcome = yield* Effect.exit(submission.outcome).pipe(Effect.forkChild)
+    yield* agent.awaitRequest("session/prompt")
+    yield* Scope.close(owner, Exit.void)
+    const acceptedExit = yield* Fiber.join(accepted)
+    const outcomeExit = yield* Fiber.join(outcome)
+    expect(Exit.isFailure(acceptedExit)).toBe(true)
+    expect(Exit.isFailure(outcomeExit)).toBe(true)
+    if (version === 1) expect(causeOf(acceptedExit)).toContain("AcpCapabilityUnsupported")
+    else expect(causeOf(acceptedExit)).toContain("AcpConnectionClosed")
+    expect(causeOf(outcomeExit)).toContain("AcpConnectionClosed")
+  })))
+}
+
+test("v2 accepted remains successful when ownership ends before the turn completes", () => run(Effect.gen(function*() {
+  const owner = yield* Scope.make()
+  const { agent, session } = yield* Scope.provide(withSession(2), owner)
+  const submission = yield* session.submit([text("held")])
+  const outcome = yield* Effect.exit(submission.outcome).pipe(Effect.forkChild)
+  yield* agent.awaitRequest("session/prompt")
+  yield* agent.respond("session/prompt", { messageId: "accepted" })
+  expect(yield* submission.accepted).toBe("accepted")
+  yield* Scope.close(owner, Exit.void)
+  expect(causeOf(yield* Fiber.join(outcome))).toContain("AcpConnectionClosed")
+})))
 
 /** Drives a submission to completion the way its protocol does. */
 const completePrompt = (agent: ScriptedAgent, version: 1 | 2, sessionId = "sess-1") =>

@@ -663,17 +663,8 @@ const connect = Effect.fnUntraced(function*(options: ConnectOptions) {
         yield* runtime.apply({ _tag: "submissionDispatched", id, requestId: sent.id })
 
         const settle = Effect.gen(function*() {
-          const result = yield* Effect.exit(sent.response.pipe(Effect.flatMap(Schema.decodeUnknownEffect(promptMethod.result)),
-            Effect.mapError((error) => error instanceof Schema.SchemaError ? new AcpProtocolError({ message: "Invalid prompt response" }) : error)))
-          if (Exit.isFailure(result)) {
-            const error = Option.getOrElse(Cause.findErrorOption(result.cause), () => new AcpProtocolError({ message: "Prompt failed", cause: Cause.squash(result.cause) }))
-            const snapshot = yield* runtime.apply({ _tag: "submissionFailed", id, failure: toFailure(error) })
-            latest = snapshot.submissions[id] ?? { ...latest, prompt: [], status: { _tag: "failed", failure: toFailure(error) } }
-            yield* Deferred.fail(accepted, error)
-            yield* Deferred.fail(outcome, error)
-            return snapshot
-          }
-          const value = result.value
+          const value = yield* sent.response.pipe(Effect.flatMap(Schema.decodeUnknownEffect(promptMethod.result)),
+            Effect.mapError((error) => error instanceof Schema.SchemaError ? new AcpProtocolError({ message: "Invalid prompt response" }) : error))
           if (version === 2) {
             // v2: the response acknowledges insertion only. Foreground work
             // ends later, on the idle state update.
@@ -702,14 +693,22 @@ const connect = Effect.fnUntraced(function*(options: ConnectOptions) {
           yield* Deferred.succeed(outcome, latest)
           return snapshot
         }).pipe(
-          Effect.catchCause((cause) => {
-            const error = Cause.hasInterrupts(cause) ? new AcpConnectionClosed({ message: "Session owner closed" }) : Option.getOrElse(Cause.findErrorOption(cause), () => new AcpProtocolError({ message: "Prompt failed", cause: Cause.squash(cause) }))
-            return runtime.apply({ _tag: "submissionFailed", id, failure: toFailure(error) }).pipe(
-              Effect.andThen(Deferred.fail(accepted, error)), Effect.andThen(Deferred.fail(outcome, error)))
+          Effect.onExit((exit) => {
+            if (Exit.isSuccess(exit)) return Effect.void
+            const cause = exit.cause
+            const error = Cause.hasInterruptsOnly(cause) ? new AcpConnectionClosed({ message: "Session owner closed" }) : Option.getOrElse(Cause.findErrorOption(cause), () => new AcpProtocolError({ message: "Prompt failed", cause: Cause.squash(cause) }))
+            // Waiters can outlive this scope. Complete them before reducer
+            // bookkeeping, which may contend with an update during shutdown.
+            return Effect.uninterruptible(Effect.gen(function*() {
+              yield* Deferred.fail(accepted, error)
+              yield* Deferred.fail(outcome, error)
+              const snapshot = yield* runtime.apply({ _tag: "submissionFailed", id, failure: toFailure(error) })
+              latest = snapshot.submissions[id] ?? { ...latest, prompt: [], status: { _tag: "failed", failure: toFailure(error) } }
+            }))
           }),
           Effect.ensuring(Semaphore.release(foreground, 1)))
 
-        yield* Effect.forkIn(settle, scope)
+        yield* Effect.forkIn(settle, scope, { startImmediately: true })
 
         return {
           id,

@@ -1,6 +1,7 @@
 import { connectOptions } from "./connectOptions.ts"
 import * as AcpGateway from "../../src/AcpGateway.ts"
 import * as Schema from "effect/Schema"
+import * as Scope from "effect/Scope"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Host from "../../src/AcpHost.ts"
@@ -20,16 +21,21 @@ export const apiFor = (host: Host.Service, principal = identity): GatewayClient.
 })
 export const hostedHarness = (version: 1 | 2, options: {
   agent?: Parameters<typeof scriptedAgent>[0]; connect?: Partial<ConnectOptions>; policy?: Partial<Host.Policy>
+  ownerScope?: Scope.Closeable; onLifecycle?: Host.Options["onLifecycle"]
 } = {}) => Effect.gen(function*() {
   const agent = yield* scriptedAgent({ version, ...options.agent })
   const local = yield* AcpClient.pipe(Effect.provide(Local.layer.pipe(Layer.provide(agent.connector))))
   let opens = 0
   const host = yield* Host.make({ policy: { ...policy, ...options.policy },
     authorize: () => Effect.void,
+    onLifecycle: options.onLifecycle,
     open: (_identity, _workspace, _profile, _options, enforced) => Effect.suspend(() => {
       opens++
       const client = opens === 1 ? Effect.succeed(local) : scriptedAgent({ version, ...options.agent }).pipe(Effect.flatMap((peer) => AcpClient.pipe(Effect.provide(Local.layer.pipe(Layer.provide(peer.connector))))))
-      return client.pipe(Effect.flatMap((local) => local.connect(connectOptions(version, { ...enforced, ...options.connect }))))
+      return client.pipe(Effect.flatMap((local) => {
+        const connected = local.connect(connectOptions(version, { ...enforced, ...options.connect }))
+        return options.ownerScope === undefined ? connected : Scope.provide(connected, options.ownerScope)
+      }))
     }) })
   const storage = GatewayClient.memoryStorage()
   const gateway = yield* GatewayClient.fromApi(apiFor(host), { workspace: "work", storage })
