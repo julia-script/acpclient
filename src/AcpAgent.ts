@@ -39,6 +39,7 @@ import * as Data from "effect/Data"
  *
  */
 import * as Cause from "effect/Cause"
+import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Deferred from "effect/Deferred"
 import * as Exit from "effect/Exit"
@@ -408,19 +409,19 @@ export const make = <R = never>(options: Options<R>): AcpAgent<R> => {
           const payload = version === 2
             ? { sessionUpdate, messageId, content }
             : { sessionUpdate, content }
-          return Effect.andThen(
-            // Retention is the store's guarantee, not the library's: we record
-            // what we emit and let the store decide what survives.
-            store.retain({
+          return Effect.gen(function*() {
+            // Retention is the store's guarantee: it keeps the first instant
+            // when a later chunk or replacement updates this message.
+            yield* store.retain({
               sessionId,
               messageId,
               role: kind === "thought" ? "thought" : kind,
               replacement: null,
               chunks: [content],
-              recordedAt: "1970-01-01T00:00:00.000Z"
-            }).pipe(Effect.ignore),
-            notify(sessionId, payload)
-          )
+              recordedAt: yield* DateTime.now
+            }).pipe(Effect.ignore)
+            yield* notify(sessionId, payload)
+          })
         }
         return {
           version,
@@ -432,21 +433,21 @@ export const make = <R = never>(options: Options<R>): AcpAgent<R> => {
               ? Effect.fail(
                 new AcpAgentError({ message: "Full message replacement requires protocol v2" })
               )
-              : Effect.andThen(
-                store.retain({
+              : Effect.gen(function*() {
+                yield* store.retain({
                   sessionId,
                   messageId,
                   role,
                   replacement: content,
                   chunks: [],
-                  recordedAt: "1970-01-01T00:00:00.000Z"
-                }).pipe(Effect.ignore),
-                notify(sessionId, {
+                  recordedAt: yield* DateTime.now
+                }).pipe(Effect.ignore)
+                yield* notify(sessionId, {
                   sessionUpdate: messageRole(role),
                   messageId,
                   content
                 })
-              ),
+              }),
           raw: (update) => notify(sessionId, update)
         }
       }
@@ -609,7 +610,7 @@ export const make = <R = never>(options: Options<R>): AcpAgent<R> => {
             role: "user",
             replacement: [...request.prompt],
             chunks: [],
-            recordedAt: "1970-01-01T00:00:00.000Z"
+            recordedAt: yield* DateTime.now
           }).pipe(Effect.mapError(toRemote))
 
           if (state.cancelled) {

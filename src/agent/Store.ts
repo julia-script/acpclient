@@ -10,6 +10,7 @@
  */
 import * as Context from "effect/Context"
 import { TaggedError } from "effect/Data"
+import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Ref from "effect/Ref"
@@ -58,8 +59,8 @@ export interface RetainedMessage {
   readonly role: MessageRole
   readonly replacement: ReadonlyArray<ContentBlock> | null
   readonly chunks: ReadonlyArray<ContentBlock>
-  /** RFC 3339 timestamp of when the message was first recorded. */
-  readonly recordedAt: string
+  /** UTC instant when this message was first recorded; later writes retain it. */
+  readonly recordedAt: DateTime.Utc
 }
 
 /** Session and transcript persistence. */
@@ -80,10 +81,16 @@ export class Store extends Context.Service<Store, {
   /**
    * Records or merges a retained message. Merging appends `chunks`; when
    * `replacement` is non-null it is set and prior chunks are cleared
-   * before appending (a replacement resets content). Returns the stored form.
+   * before appending (a replacement resets content). The first `recordedAt`
+   * and insertion position for each `(sessionId, messageId)` survive later
+   * writes. Returns the stored form.
    */
   readonly retain: (message: RetainedMessage) => Effect.Effect<RetainedMessage, StoreError>
-  /** Reads all retained messages for a session in recording order. */
+  /**
+   * Reads messages by first-recorded instant, breaking equal-time ties by
+   * first insertion order. Persistent implementations must keep that order
+   * themselves; the interface cannot derive it from timestamps alone.
+   */
   readonly retained: (sessionId: string) => Effect.Effect<ReadonlyArray<RetainedMessage>, StoreError>
 }>()("effect-acp/agent/Store") {}
 
@@ -164,7 +171,10 @@ export const InMemory = Effect.gen(function*() {
       }).pipe(Effect.flatten),
     retained: (sessionId) =>
       Ref.get(state).pipe(Effect.map(({ retained }) =>
-        [...(retained.get(sessionId)?.values() ?? [])].sort((a, b) => a.recordedAt.localeCompare(b.recordedAt))
+        [...(retained.get(sessionId)?.values() ?? [])]
+          .map((message, insertion) => ({ message, insertion }))
+          .sort((a, b) => DateTime.toEpochMillis(a.message.recordedAt) - DateTime.toEpochMillis(b.message.recordedAt) || a.insertion - b.insertion)
+          .map(({ message }) => message)
       ))
   })
 })

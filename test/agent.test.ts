@@ -8,6 +8,8 @@ import * as Json from "../src/internal/json.ts"
  */
 import { describe, expect, test } from "bun:test"
 import * as Context from "effect/Context"
+import * as Clock from "effect/Clock"
+import * as DateTime from "effect/DateTime"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -390,6 +392,70 @@ describe("cancellation", () => {
 })
 
 describe("store-backed replay", () => {
+  test("records each message's first real time across chunks and replacements, then replays in that order", () =>
+    run(Effect.gen(function*() {
+      const store = yield* Store.Store
+      const liveClock = yield* Clock.Clock
+      let now = 10_000
+      const clock: Clock.Clock = {
+        currentTimeMillisUnsafe: () => now,
+        currentTimeMillis: Effect.sync(() => now),
+        currentTimeNanosUnsafe: () => liveClock.currentTimeNanosUnsafe(),
+        currentTimeNanos: liveClock.currentTimeNanos,
+        monotonicTimeNanosUnsafe: () => liveClock.monotonicTimeNanosUnsafe(),
+        monotonicTimeNanos: liveClock.monotonicTimeNanos,
+        sleep: (duration) => liveClock.sleep(duration)
+      }
+      const agent = AcpAgent.make({
+        ...baseOptions(),
+        session: { create: () => Effect.succeed({ sessionId: "s-1" }), resume: () => Effect.void },
+        prompt: {
+          insert: () => Effect.succeed({ messageId: "prompt" }),
+          execute: ({ emit }) => Effect.gen(function*() {
+            now = 20_000
+            yield* emit.agentChunk("agent", { type: "text", text: "first" })
+            now = 30_000
+            yield* emit.thoughtChunk("thought", { type: "text", text: "thinking" })
+            now = 40_000
+            yield* emit.userChunk("user", { type: "text", text: "follow-up" })
+            now = 50_000
+            yield* emit.message("agent", "agent", [{ type: "text", text: "revised" }])
+            now = 60_000
+            yield* emit.agentChunk("agent", { type: "text", text: "tail" })
+            return "end_turn" as const
+          })
+        }
+      })
+      const peer = yield* connect(agent).pipe(Effect.provideService(Clock.Clock, clock))
+      yield* peer.send(initialize(2))
+      yield* peer.next
+      yield* peer.send({ jsonrpc: "2.0", id: 1, method: "session/new", params: { cwd: "/tmp" } })
+      yield* peer.next
+      yield* peer.send({ jsonrpc: "2.0", id: 2, method: "session/prompt", params: { sessionId: "s-1", prompt: [] } })
+      while (field(yield* peer.next, "params.update.state") !== "idle") {}
+
+      const retained = yield* store.retained("s-1")
+      expect(retained.map((message) => message.messageId)).toEqual(["prompt", "agent", "thought", "user"])
+      expect(retained.map((message) => DateTime.toEpochMillis(message.recordedAt))).toEqual([10_000, 20_000, 30_000, 40_000])
+      expect(retained[1]?.replacement).toEqual([{ type: "text", text: "revised" }])
+      expect(retained[1]?.chunks).toEqual([{ type: "text", text: "tail" }])
+
+      // A later inserted historical record must replay at its recorded time.
+      yield* store.retain({ sessionId: "s-1", messageId: "backfill", role: "agent",
+        replacement: [{ type: "text", text: "earlier" }], chunks: [], recordedAt: DateTime.makeUnsafe(5_000) })
+      yield* peer.send({ jsonrpc: "2.0", id: 3, method: "session/resume", params: { sessionId: "s-1", cwd: "/tmp", replayFrom: { type: "start" } } })
+      const replayed: Array<string> = []
+      while (true) {
+        const frame = yield* peer.next
+        if (field(frame, "id") === 3) break
+        const update = field(frame, "params.update.sessionUpdate")
+        if (update === "user_message" || update === "agent_message" || update === "agent_thought") {
+          replayed.push(field(frame, "params.update.messageId") as string)
+        }
+      }
+      expect(replayed).toEqual(["backfill", "prompt", "agent", "thought", "user"])
+    })))
+
   test("replay preserves the message id and resets content before appending chunks", () =>
     run(Effect.gen(function*() {
       const store = yield* Effect.service(Store.Store)
@@ -412,7 +478,7 @@ describe("store-backed replay", () => {
         role: "agent",
         replacement: [{ type: "text", text: "final" }],
         chunks: [{ type: "text", text: " more" }],
-        recordedAt: "2020-01-01T00:00:00Z"
+        recordedAt: DateTime.makeUnsafe("2020-01-01T00:00:00Z")
       })
 
       yield* peer.send({
@@ -635,10 +701,38 @@ test("v1 close does not turn an interruption-time defect into cancellation", () 
 test("store appends chunks without losing previous chunks or replacement content", () => run(Effect.gen(function*() {
   const store = yield* Store.Store
   yield* store.create({ sessionId: "s", cwd: "/tmp" })
-  const message = { sessionId: "s", messageId: "m", role: "agent" as const, recordedAt: "2026-01-01T00:00:00Z" }
+  const message = { sessionId: "s", messageId: "m", role: "agent" as const, recordedAt: DateTime.makeUnsafe("2026-01-01T00:00:00Z") }
   yield* store.retain({ ...message, replacement: [{ type: "text", text: "base" }], chunks: [] })
   for (const text of ["one", "two"]) yield* store.retain({ ...message, replacement: null, chunks: [{ type: "text", text }] })
   const [retained] = yield* store.retained("s")
   expect(retained!.replacement).toEqual([{ type: "text", text: "base" }])
   expect(retained!.chunks).toEqual([{ type: "text", text: "one" }, { type: "text", text: "two" }])
+})))
+
+test("store orders first recordings by time, keeps equal-time insertion order, and scopes ids by session", () => run(Effect.gen(function*() {
+  const store = yield* Store.Store
+  const at = (millis: number) => DateTime.makeUnsafe(millis)
+  yield* store.create({ sessionId: "one", cwd: "/tmp" })
+  yield* store.create({ sessionId: "two", cwd: "/tmp" })
+  const retain = (sessionId: string, messageId: string, millis: number, replacement: Store.RetainedMessage["replacement"] = null) =>
+    store.retain({ sessionId, messageId, role: "agent", replacement, chunks: [], recordedAt: at(millis) })
+
+  yield* retain("one", "late", 3_000)
+  yield* retain("one", "first", 1_000)
+  yield* retain("one", "equal-a", 2_000)
+  yield* retain("one", "equal-b", 2_000)
+  yield* retain("two", "first", 4_000)
+  yield* retain("one", "first", 9_000, [{ type: "text", text: "replaced" }])
+  yield* store.retain({ sessionId: "one", messageId: "first", role: "agent", replacement: null,
+    chunks: [{ type: "text", text: "chunk" }], recordedAt: at(10_000) })
+  yield* retain("one", "equal-b", 500)
+  yield* retain("one", "late", 500)
+
+  const one = yield* store.retained("one")
+  const two = yield* store.retained("two")
+  expect(one.map((message) => message.messageId)).toEqual(["first", "equal-a", "equal-b", "late"])
+  expect(one.map((message) => DateTime.toEpochMillis(message.recordedAt))).toEqual([1_000, 2_000, 2_000, 3_000])
+  expect(one[0]?.replacement).toEqual([{ type: "text", text: "replaced" }])
+  expect(one[0]?.chunks).toEqual([{ type: "text", text: "chunk" }])
+  expect(two.map((message) => [message.messageId, DateTime.toEpochMillis(message.recordedAt)])).toEqual([["first", 4_000]])
 })))
