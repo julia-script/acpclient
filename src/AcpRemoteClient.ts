@@ -6,6 +6,7 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Layer from "effect/Layer"
 import * as Queue from "effect/Queue"
+import * as RcMap from "effect/RcMap"
 import * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
@@ -33,17 +34,20 @@ const network = <A, E, R>(effect: Effect.Effect<A, E, R>) => effect.pipe(Effect.
 export const make = (gateway: Client, options: Options) => Effect.gen(function*() {
   const capacity = options.observerCapacity ?? 256
   if (!Number.isSafeInteger(capacity) || capacity <= 0) return yield* AcpGateway.failure("Invalid")
-    const sessions = new Map<string, AcpSession>()
+  const descriptors = new WeakMap<AcpSession, SessionDescriptor>()
   const controllers = new Map<string, number>()
   const run = (command: AcpGateway.Command, generation?: number): Effect.Effect<unknown, AcpGateway.CommandError> =>
     network(gateway.command(command, generation)).pipe(Effect.flatMap((op) => op.error ? Effect.fail(op.error) : Effect.succeed(op.result)))
 
   /** Reattaches retained state without ACP initialize/resume or resubmitting a prompt. */
-  const attach = (descriptor: SessionDescriptor, takeover = false): Effect.Effect<AcpSession, AcpGateway.GatewayError, Scope.Scope> => Effect.gen(function*() {
-    if (descriptor.epoch !== gateway.window.epoch) return yield* AcpGateway.failure("HostRestarted")
-    const existing = sessions.get(descriptor.session)
-    if (existing) return existing
+  const acquire = (descriptor: SessionDescriptor, takeover: boolean, cacheKey: string, token: symbol): Effect.Effect<AcpSession, AcpGateway.GatewayError, Scope.Scope> => Effect.gen(function*() {
     const owned = yield* Scope.fork(yield* Scope.Scope)
+    yield* Scope.addFinalizer(owned, Effect.sync(() => {
+      if (entries.get(cacheKey) === token) {
+        entries.delete(cacheKey)
+        requests.delete(cacheKey)
+      }
+    }))
     const key = `${gateway.prefix}:session:${descriptor.session}`
     const saved = yield* gateway.storage.load(key).pipe(Effect.flatMap(Schema.decodeUnknownEffect(RetainedSession)), Effect.mapError(() => AcpGateway.failure("Invalid")))
     const retained = saved?.cursor.epoch === gateway.window.epoch ? saved : undefined
@@ -57,8 +61,12 @@ export const make = (gateway: Client, options: Options) => Effect.gen(function*(
     const failure = (error: AcpGateway.GatewayError) => Effect.gen(function*() {
       failed = error
       if (controllers.get(descriptor.session) === generation) {
-        sessions.delete(descriptor.session)
         controllers.delete(descriptor.session)
+      }
+      if (entries.get(cacheKey) === token) {
+        entries.delete(cacheKey)
+        requests.delete(cacheKey)
+        yield* RcMap.invalidate(attachments, cacheKey)
       }
       yield* Deferred.fail(ready, error)
       for (const queue of observers) yield* Queue.fail(queue, error)
@@ -89,7 +97,8 @@ export const make = (gateway: Client, options: Options) => Effect.gen(function*(
       ...(retained ? { cursor: retained.cursor } : {}) })
     yield* network(Stream.runForEach(incoming, receive)).pipe(
       Effect.andThen(failure(AcpGateway.failure("Closed"))), Effect.catch((error) => failure(error)), Effect.forkIn(owned))
-    yield* Deferred.await(ready).pipe(Effect.onError(() => Scope.close(owned, Exit.void)))
+    yield* Deferred.await(ready)
+    if (snapshot!.sessionId !== descriptor.sessionId || snapshot!.version !== descriptor.version) return yield* AcpGateway.failure("Invalid")
     const observe: AcpSession["observe"] = Effect.gen(function*() {
       const queue = yield* Queue.bounded<Observation, AcpSubscriptionOverflow | AcpGateway.GatewayError | Cause.Done>(capacity)
       observers.add(queue)
@@ -113,10 +122,7 @@ export const make = (gateway: Client, options: Options) => Effect.gen(function*(
     }))
     const session: AcpSession = {
       sessionId: descriptor.sessionId, version: descriptor.version,
-      release: Effect.sync(() => {
-        if (sessions.get(descriptor.session) === session) sessions.delete(descriptor.session)
-        if (controllers.get(descriptor.session) === generation) controllers.delete(descriptor.session)
-      }).pipe(Effect.andThen(Scope.close(owned, Exit.void))),
+      release: Scope.close(owned, Exit.void),
       snapshot: Effect.sync(() => snapshot!), observe,
       changes: Stream.unwrap(Effect.map(observe, (value) => value.changes)),
       submit: (prompt) => Effect.gen(function*() {
@@ -154,14 +160,35 @@ export const make = (gateway: Client, options: Options) => Effect.gen(function*(
       close: Effect.asVoid(command({ _tag: "Close", session: descriptor.session })),
       delete: Effect.asVoid(command({ _tag: "Delete", session: descriptor.session }))
     }
-    sessions.set(descriptor.session, session)
     yield* Scope.addFinalizer(owned, Effect.suspend(() => {
-      if (sessions.get(descriptor.session) === session) sessions.delete(descriptor.session)
       if (controllers.get(descriptor.session) === generation) controllers.delete(descriptor.session)
       failed = AcpGateway.failure("Closed")
       return Effect.forEach(observers, Queue.end, { discard: true })
     }))
     return session
+  })
+  // The key includes caller-supplied metadata and takeover intent so a fresh
+  // descriptor cannot silently inherit a handle created for different inputs.
+  const entries = new Map<string, symbol>()
+  const requests = new Map<string, { descriptor: SessionDescriptor; takeover: boolean }>()
+  const mapScope = yield* Scope.make()
+  const attachments = yield* RcMap.make({ lookup: (cacheKey: string) => {
+    const request = requests.get(cacheKey)!
+    const token = Symbol()
+    entries.set(cacheKey, token)
+    return acquire(request.descriptor, request.takeover, cacheKey, token)
+  } }).pipe(Scope.provide(mapScope))
+  const attach = (descriptor: SessionDescriptor, takeover = false): Effect.Effect<AcpSession, AcpGateway.GatewayError, Scope.Scope> => Effect.gen(function*() {
+    if (descriptor.epoch !== gateway.window.epoch) return yield* AcpGateway.failure("HostRestarted")
+    const borrowed = yield* Scope.fork(yield* Scope.Scope)
+    const cacheKey = `${descriptor.session.length}:${descriptor.session}${descriptor.sessionId.length}:${descriptor.sessionId}${descriptor.version}${takeover ? 1 : 0}`
+    if (!requests.has(cacheKey)) requests.set(cacheKey, { descriptor, takeover })
+    const shared = yield* RcMap.get(attachments, cacheKey).pipe(
+      Scope.provide(borrowed), Effect.onError(() => Scope.close(borrowed, Exit.void)))
+    const handle: AcpSession = { ...shared, release: Scope.close(borrowed, Exit.void) }
+    descriptors.set(handle, descriptor)
+    yield* Scope.addFinalizer(borrowed, Effect.sync(() => { descriptors.delete(handle) }))
+    return handle
   })
   const connect: AcpClient["Service"]["connect"] = () => Effect.gen(function*() {
     const connectionScope = yield* Scope.Scope
@@ -194,9 +221,6 @@ export const make = (gateway: Client, options: Options) => Effect.gen(function*(
       logout: Effect.asVoid(run({ _tag: "Logout", connection }))
     } satisfies AcpAgentConnection
   })
-  return { connect, attach, descriptor: (session: AcpSession): SessionDescriptor | undefined => {
-    const entry = [...sessions.entries()].find(([, handle]) => handle === session)
-    return entry ? { epoch: gateway.window.epoch, session: entry[0], sessionId: session.sessionId, version: session.version } : undefined
-  } }
+  return { connect, attach, descriptor: (session: AcpSession): SessionDescriptor | undefined => descriptors.get(session) }
 })
 export const layer = (gateway: Client, options: Options) => Layer.effect(AcpClient, make(gateway, options))
