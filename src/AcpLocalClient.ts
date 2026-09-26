@@ -27,6 +27,7 @@ import * as Option from "effect/Option"
 import * as Cause from "effect/Cause"
 import * as Deferred from "effect/Deferred"
 import * as Duration from "effect/Duration"
+import * as Equal from "effect/Equal"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
@@ -305,6 +306,7 @@ interface Provisional {
   readonly _tag: "provisional"
   readonly buffered: Array<{ sessionId: string; update: unknown }>
   previous?: LiveRoute
+  replay?: { readonly history: ReadonlyArray<unknown>; index: number; matching: boolean }
   overflowed: boolean
   bytes: number
 }
@@ -384,9 +386,19 @@ const connect = Effect.fnUntraced(function*(options: ConnectOptions) {
       }
       if (route._tag === "live") return Effect.asVoid(route.runtime.apply({ _tag: "update", update }))
       buffer(route, sessionId, update)
-      return route.previous === undefined
-        ? Effect.void
-        : Effect.asVoid(route.previous.runtime.apply({ _tag: "update", update }))
+      if (route.previous === undefined) return Effect.void
+      const replay = route.replay
+      if (replay?.matching) {
+        // A history replay may omit non-conversation updates retained in raw.
+        for (let index = replay.index; index < replay.history.length; index++) {
+          if (Equal.equals(replay.history[index], update)) {
+            replay.index = index + 1
+            return Effect.void
+          }
+        }
+        replay.matching = false
+      }
+      return Effect.asVoid(route.previous.runtime.apply({ _tag: "update", update }))
     }))
 
   const sessionIdOf = (params: unknown): string | undefined =>
@@ -403,36 +415,39 @@ const connect = Effect.fnUntraced(function*(options: ConnectOptions) {
       const request = yield* Schema.decodeUnknownEffect(InteractionRequest)(params).pipe(
         Effect.mapError(() => new AcpRemoteError({ code: ErrorCode.InvalidParams, message: "Invalid interaction request" }))
       )
-      const current = sessionId === undefined ? undefined : routes.get(sessionId)
-      const route = current?._tag === "provisional" ? current.previous : current
-      if (route === undefined || route._tag !== "live") {
-        return yield* new AcpRemoteError({
-          code: ErrorCode.InvalidParams,
-          message: `No live session for ${kind} request`
-        })
-      }
-      const runtime = route.runtime
-      const interactionId = localId(kind)
-      const respond = yield* Deferred.make<InteractionOutcome>()
-      const snapshot = yield* runtime.current
       const encodedParams = yield* Json.encode(params).pipe(Effect.mapError(() => new AcpRemoteError({
         code: ErrorCode.InvalidParams, message: "Interaction is not JSON serializable"
       })))
-      if (Object.values(snapshot.interactions).filter((i) => i.status === "pending").length >= limits.interactions ||
-        new TextEncoder().encode(encodedParams).byteLength > (limits.transcriptBytes ?? 4 * 1024 * 1024) / (limits.interactions + 1)) {
-        return yield* new AcpRemoteError({ code: ErrorCode.InvalidRequest, message: "Interaction capacity exceeded" })
-      }
-      const interaction: InteractionSnapshot = {
-        interactionId,
-        kind,
-        version,
-        status: "pending",
-        request,
-        outcome: null,
-        createdAt: snapshot.seq + 1,
-        resolvedAt: null
-      }
-      yield* runtime.registerInteraction(interaction, respond)
+      const { runtime, interactionId, respond } = yield* Semaphore.withPermit(routingLock, Effect.gen(function*() {
+        const current = sessionId === undefined ? undefined : routes.get(sessionId)
+        const route = current?._tag === "provisional" ? current.previous : current
+        if (route === undefined || route._tag !== "live") {
+          return yield* new AcpRemoteError({
+            code: ErrorCode.InvalidParams,
+            message: `No live session for ${kind} request`
+          })
+        }
+        const runtime = route.runtime
+        const interactionId = localId(kind)
+        const respond = yield* Deferred.make<InteractionOutcome>()
+        const snapshot = yield* runtime.current
+        if (Object.values(snapshot.interactions).filter((i) => i.status === "pending").length >= limits.interactions ||
+          new TextEncoder().encode(encodedParams).byteLength > (limits.transcriptBytes ?? 4 * 1024 * 1024) / (limits.interactions + 1)) {
+          return yield* new AcpRemoteError({ code: ErrorCode.InvalidRequest, message: "Interaction capacity exceeded" })
+        }
+        const interaction: InteractionSnapshot = {
+          interactionId,
+          kind,
+          version,
+          status: "pending",
+          request,
+          outcome: null,
+          createdAt: snapshot.seq + 1,
+          resolvedAt: null
+        }
+        yield* runtime.registerInteraction(interaction, respond)
+        return { runtime, interactionId, respond }
+      }))
       // Waiting happens here, on this request's own fiber. The connection
       // reader keeps dispatching other traffic while a human decides.
       const waiting = options.interactionTimeout === undefined
@@ -456,6 +471,15 @@ const connect = Effect.fnUntraced(function*(options: ConnectOptions) {
   /** The protocol's own "the user did not answer" outcome for each request kind. */
   const cancelledOutcome = (kind: "permission" | "elicitation", _version: 1 | 2): InteractionOutcome =>
     kind === "permission" ? { outcome: { outcome: "cancelled" } } : { action: "cancel" }
+
+  const cancelPendingInteractions = (runtime: Runtime) => Effect.gen(function*() {
+    const snapshot = yield* runtime.current
+    for (const interaction of Object.values(snapshot.interactions)) {
+      if (interaction.status === "pending") {
+        yield* runtime.settle(interaction.interactionId, "cancelled", cancelledOutcome(interaction.kind, interaction.version))
+      }
+    }
+  })
 
   const v1HandlerRoutes = (negotiated: AcpProtocol.Negotiated): ReadonlyArray<AcpConnection.Route> => {
     if (negotiated.version !== 1) return []
@@ -711,11 +735,15 @@ const connect = Effect.fnUntraced(function*(options: ConnectOptions) {
         const route = routes.get(sessionId)
         const ownedRoute = route?._tag === "provisional" ? route.previous : route
         if (ownedRoute?.runtime !== runtime) return Effect.void
-        if (route?._tag === "provisional") route.previous = undefined
+        const resuming = route?._tag === "provisional"
+        if (resuming) route.previous = undefined
         else routes.delete(sessionId)
         const owned = sessionScopes.get(sessionId)
         sessionScopes.delete(sessionId)
-        return owned ? Scope.close(owned, Exit.void) : Effect.void
+        return owned === undefined ? Effect.void : Effect.andThen(
+          resuming ? cancelPendingInteractions(runtime) : Effect.void,
+          Scope.close(owned, Exit.void)
+        )
       })),
       snapshot: runtime.current,
       observe: runtime.observe,
@@ -791,6 +819,7 @@ const connect = Effect.fnUntraced(function*(options: ConnectOptions) {
   const establish = Effect.fnUntraced(function*<E>(
     knownSessionId: string | undefined,
     cwd: string,
+    replayHistory: boolean,
     request: (routeKey: string) => Effect.Effect<{ readonly sessionId: string; readonly result: V1.NewSessionResponse | V1.LoadSessionResponse | V1.ResumeSessionResponse | V2.NewSessionResponse | V2.ResumeSessionResponse }, E>
   ) {
     // For `session/new` the id is not known until the response, so routing is
@@ -800,12 +829,19 @@ const connect = Effect.fnUntraced(function*(options: ConnectOptions) {
     const previousScope = yield* Semaphore.withPermit(routingLock, Effect.gen(function*() {
       const previous = knownSessionId === undefined ? undefined : routes.get(knownSessionId)
       const owned = knownSessionId === undefined ? undefined : sessionScopes.get(knownSessionId)
+      const previousSnapshot = previous?._tag === "live" ? yield* previous.runtime.current : undefined
       if (previous?._tag === "live" && owned !== undefined && owned.state._tag !== "Closed" &&
-        (yield* previous.runtime.current).activeSubmissionId !== null) {
+        previousSnapshot?.activeSubmissionId !== null) {
         return yield* new AcpSessionBusy({ message: "Cannot resume a session with active work" })
       }
       if (previous?._tag === "live" && owned !== undefined && owned.state._tag !== "Closed") {
         provisional.previous = previous
+        if (replayHistory && previousSnapshot !== undefined) {
+          // Replayed history follows the order of retained wire updates, but
+          // may omit updates that were never part of conversation history.
+          // Once a novel update arrives, forward the rest live.
+          provisional.replay = { history: previousSnapshot.raw.map((record) => record.update), index: 0, matching: true }
+        }
       }
       routes.set(routeKey, provisional)
       // Unknown ids are buffered until session/new supplies the real id.
@@ -861,6 +897,11 @@ const connect = Effect.fnUntraced(function*(options: ConnectOptions) {
           return yield* new AcpConnectionClosed({ message: "Connection closed while establishing session" })
         }
         const owned = sessionScopes.get(sessionId)
+        const displaced = routes.get(sessionId)
+        const prior = displaced?._tag === "provisional" ? displaced.previous : displaced
+        if (owned !== undefined && owned.state._tag !== "Closed" && prior !== undefined) {
+          yield* cancelPendingInteractions(prior.runtime)
+        }
         sessionScopes.set(sessionId, sessionScope)
         if (routes.get(routeKey) === provisional) routes.delete(routeKey)
         routes.set(sessionId, { _tag: "live", runtime })
@@ -887,7 +928,7 @@ const connect = Effect.fnUntraced(function*(options: ConnectOptions) {
       const input = { cwd: sessionOptions.cwd,
         ...(sessionOptions.additionalDirectories === undefined ? {} : { additionalDirectories: sessionOptions.additionalDirectories }),
         mcpServers: sessionOptions.mcpServers ?? [] }
-      return yield* establish(undefined, sessionOptions.cwd, () => Effect.gen(function*() {
+      return yield* establish(undefined, sessionOptions.cwd, false, () => Effect.gen(function*() {
         const invalid = (cause: Schema.SchemaError) => new AcpProtocolError({ message: "Invalid session/new params", cause })
         const result = version === 2
           ? yield* request(V2.agentMethods["session/new"], yield* Schema.decodeUnknownEffect(V2.NewSessionRequest)(input).pipe(Effect.mapError(invalid)))
@@ -923,13 +964,15 @@ const connect = Effect.fnUntraced(function*(options: ConnectOptions) {
         ...(sessionOptions.additionalDirectories === undefined ? {} : { additionalDirectories: sessionOptions.additionalDirectories }),
         mcpServers: sessionOptions.mcpServers ?? [],
         ...(version === 2 && sessionOptions.replayFrom !== undefined ? { replayFrom: sessionOptions.replayFrom } : {}) }
-      return yield* establish(sessionOptions.sessionId, sessionOptions.cwd, () => Effect.gen(function*() {
-        const invalid = (cause: Schema.SchemaError) => new AcpProtocolError({ message: "Invalid session resume params", cause })
-        const result = version === 2
-          ? yield* request(V2.agentMethods["session/resume"], yield* Schema.decodeUnknownEffect(V2.ResumeSessionRequest)(input).pipe(Effect.mapError(invalid)))
-          : yield* request(V1.agentMethods[operation], yield* Schema.decodeUnknownEffect(V1.agentMethods[operation].params)(input).pipe(Effect.mapError(invalid)))
-        return { sessionId: sessionOptions.sessionId, result }
-      }))
+      return yield* establish(sessionOptions.sessionId, sessionOptions.cwd,
+        version === 1 ? operation === "session/load" : sessionOptions.replayFrom?.type === "start",
+        () => Effect.gen(function*() {
+          const invalid = (cause: Schema.SchemaError) => new AcpProtocolError({ message: "Invalid session resume params", cause })
+          const result = version === 2
+            ? yield* request(V2.agentMethods["session/resume"], yield* Schema.decodeUnknownEffect(V2.ResumeSessionRequest)(input).pipe(Effect.mapError(invalid)))
+            : yield* request(V1.agentMethods[operation], yield* Schema.decodeUnknownEffect(V1.agentMethods[operation].params)(input).pipe(Effect.mapError(invalid)))
+          return { sessionId: sessionOptions.sessionId, result }
+        }))
     }))
 
   const listSessions = (cwd?: string) =>

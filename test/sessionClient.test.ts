@@ -918,6 +918,29 @@ describe("provisional routing bounds", () => {
     })))
 
   for (const version of [1, 2] as const) {
+    test(`v${version} failed history replay keeps only fresh updates on the prior route`, () =>
+      run(Effect.gen(function*() {
+        const { agent, connection, session } = yield* withSession(version, resumeOptions(version))
+        const observed = yield* session.observe
+        if (version === 2) {
+          // State updates are retained in raw, but are not conversation history.
+          yield* agent.update("sess-1", { sessionUpdate: "state_update", state: "idle" })
+        }
+        yield* agent.update("sess-1", { sessionUpdate: "agent_message_chunk", ...(version === 2 ? { messageId: "history" } : {}), content: text("history") })
+        yield* Stream.runCollect(Stream.take(Stream.filter(observed.changes, (event) => hasText(event.snapshot, "history")), 1))
+
+        const resuming = yield* Effect.forkChild(connection.resumeSession({ sessionId: "sess-1", cwd: "/work", replayFrom: { type: "start" } }))
+        const method = version === 1 ? "session/load" : "session/resume"
+        yield* agent.awaitRequest(method)
+        yield* agent.update("sess-1", { sessionUpdate: "agent_message_chunk", ...(version === 2 ? { messageId: "history" } : {}), content: text("history") })
+        yield* agent.update("sess-1", { sessionUpdate: "agent_message_chunk", ...(version === 2 ? { messageId: "fresh" } : {}), content: text("fresh") })
+        yield* agent.respondError(method, -32603, "replay failed")
+        expect(causeOf(yield* Fiber.await(resuming))).toContain("replay failed")
+        const content = (yield* session.snapshot).messages.flatMap((message) => message.content)
+        expect(content.filter((part) => "text" in part && part.text === "history")).toHaveLength(1)
+        expect(content.filter((part) => "text" in part && part.text === "fresh")).toHaveLength(1)
+      })))
+
     test(`v${version} failed resume keeps the prior route and live events`, () =>
       run(Effect.gen(function*() {
         const { agent, connection, session } = yield* withSession(version, resumeOptions(version))
@@ -977,7 +1000,16 @@ describe("provisional routing bounds", () => {
       const { agent, connection, session } = yield* withSession(2, resumeOptions(2))
       const resuming = yield* Effect.forkChild(connection.resumeSession({ sessionId: "sess-1", cwd: "/work" }))
       yield* agent.awaitRequest("session/resume")
+      const observed = yield* session.observe
+      yield* agent.send({
+        jsonrpc: "2.0", id: "released-inflight-permission", method: "session/request_permission",
+        params: { sessionId: "sess-1", title: "Edit file", options: [{ optionId: "allow", name: "Allow", kind: "allow_once" }] }
+      })
+      yield* Stream.runCollect(Stream.take(Stream.filter(observed.changes, (event) =>
+        Object.values(event.snapshot.interactions).some((interaction) => interaction.status === "pending")
+      ), 1))
       yield* session.release
+      expect(yield* agent.awaitReply("released-inflight-permission")).toMatchObject({ result: { outcome: { outcome: "cancelled" } } })
       yield* agent.respondError("session/resume", -32603, "resume failed")
       expect(causeOf(yield* Fiber.await(resuming))).toContain("resume failed")
       yield* agent.send({
@@ -986,6 +1018,30 @@ describe("provisional routing bounds", () => {
       })
       expect(yield* agent.awaitReply("released-permission")).toMatchObject({ error: { code: -32602 } })
     })))
+
+  for (const version of [1, 2] as const) {
+    test(`v${version} permission admitted during resume receives a response after promotion`, () =>
+      run(Effect.gen(function*() {
+        const { agent, connection, session } = yield* withSession(version, resumeOptions(version))
+        const resuming = yield* Effect.forkChild(connection.resumeSession({ sessionId: "sess-1", cwd: "/work" }))
+        yield* agent.awaitRequest("session/resume")
+        const observed = yield* session.observe
+        yield* agent.send({
+          jsonrpc: "2.0", id: "promotion-permission", method: "session/request_permission",
+          params: {
+            sessionId: "sess-1", title: "Edit file",
+            ...(version === 1 ? { toolCall: { toolCallId: "t-1", title: "Edit file" } } : {}),
+            options: [{ optionId: "allow", name: "Allow", kind: "allow_once" }]
+          }
+        })
+        yield* Stream.runCollect(Stream.take(Stream.filter(observed.changes, (event) =>
+          Object.values(event.snapshot.interactions).some((interaction) => interaction.status === "pending")
+        ), 1))
+        yield* agent.respond("session/resume", {})
+        yield* Fiber.join(resuming)
+        expect(yield* agent.awaitReply("promotion-permission")).toMatchObject({ result: { outcome: { outcome: "cancelled" } } })
+      })))
+  }
 })
 
 describe("resource ownership", () => {
