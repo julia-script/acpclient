@@ -45,7 +45,7 @@ export const make = (gateway: Client, options: Options) => Effect.gen(function*(
     yield* Scope.addFinalizer(owned, Effect.sync(() => {
       if (entries.get(cacheKey) === token) {
         entries.delete(cacheKey)
-        requests.delete(cacheKey)
+        if (requests.get(cacheKey)?.borrowers === 0) requests.delete(cacheKey)
       }
     }))
     const key = `${gateway.prefix}:session:${descriptor.session}`
@@ -70,8 +70,6 @@ export const make = (gateway: Client, options: Options) => Effect.gen(function*(
         controllers.delete(descriptor.session)
       }
       if (entries.get(cacheKey) === token) {
-        entries.delete(cacheKey)
-        requests.delete(cacheKey)
         yield* RcMap.invalidate(attachments, cacheKey)
       }
       yield* Deferred.fail(ready, error)
@@ -176,7 +174,7 @@ export const make = (gateway: Client, options: Options) => Effect.gen(function*(
   // The key includes caller-supplied metadata and takeover intent so a fresh
   // descriptor cannot silently inherit a handle created for different inputs.
   const entries = new Map<string, symbol>()
-  const requests = new Map<string, { descriptor: SessionDescriptor; takeover: boolean }>()
+  const requests = new Map<string, { descriptor: SessionDescriptor; takeover: boolean; borrowers: number }>()
   const mapScope = yield* Scope.make()
   const attachments = yield* RcMap.make({ lookup: (cacheKey: string) => {
     const request = requests.get(cacheKey)!
@@ -186,17 +184,28 @@ export const make = (gateway: Client, options: Options) => Effect.gen(function*(
   } }).pipe(Scope.provide(mapScope))
   const attach = (descriptor: SessionDescriptor, takeover = false): Effect.Effect<AcpSession, AcpGateway.GatewayError, Scope.Scope> => Effect.gen(function*() {
     if (descriptor.epoch !== gateway.window.epoch) return yield* AcpGateway.failure("HostRestarted")
-    // The first caller records its descriptor before RcMap starts lookup, so
-    // another key cannot take over that session with mismatched metadata.
-    for (const request of requests.values()) {
-      if (request.descriptor.session === descriptor.session &&
-        (request.descriptor.sessionId !== descriptor.sessionId || request.descriptor.version !== descriptor.version)) {
-        return yield* AcpGateway.failure("Invalid")
-      }
-    }
     const borrowed = yield* Scope.fork(yield* Scope.Scope)
     const cacheKey = `${descriptor.session.length}:${descriptor.session}${descriptor.sessionId.length}:${descriptor.sessionId}${descriptor.version}${takeover ? 1 : 0}`
-    if (!requests.has(cacheKey)) requests.set(cacheKey, { descriptor, takeover })
+    // Check and publish the claim in one uninterruptible step. Other keys can
+    // inspect it even before RcMap's lookup receives its first frame.
+    yield* Effect.uninterruptible(Effect.suspend(() => {
+      for (const request of requests.values()) {
+        if (request.descriptor.session === descriptor.session &&
+          (request.descriptor.sessionId !== descriptor.sessionId || request.descriptor.version !== descriptor.version)) {
+          return Effect.fail(AcpGateway.failure("Invalid"))
+        }
+      }
+      let request = requests.get(cacheKey)
+      if (!request) {
+        request = { descriptor, takeover, borrowers: 0 }
+        requests.set(cacheKey, request)
+      }
+      request.borrowers++
+      return Scope.addFinalizer(borrowed, Effect.sync(() => {
+        request.borrowers--
+        if (request.borrowers === 0 && !entries.has(cacheKey) && requests.get(cacheKey) === request) requests.delete(cacheKey)
+      }))
+    })).pipe(Effect.onError(() => Scope.close(borrowed, Exit.void)))
     const shared = yield* RcMap.get(attachments, cacheKey).pipe(
       Scope.provide(borrowed), Effect.onError(() => Scope.close(borrowed, Exit.void)))
     const handle: AcpSession = { ...shared, release: Scope.close(borrowed, Exit.void) }

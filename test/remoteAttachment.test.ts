@@ -138,6 +138,36 @@ test("failed acquisition can retry and takeover still reaches the host", () => r
   yield* Scope.close(scope, Exit.void)
 })))
 
+test("a failed first snapshot save releases the controller before retry", () => run(Effect.gen(function*() {
+  let detached = 0
+  const h = yield* hostedHarness(2, { onLifecycle: (event) => Effect.sync(() => {
+    if (event.type === "detached") detached++
+  }) })
+  const original = yield* h.connection.newSession({ cwd: "/work" })
+  const descriptor = h.remote.descriptor(original)!
+  yield* original.release
+  const base = GC.memoryStorage()
+  let failSave = true
+  const storage: GC.Storage = {
+    load: base.load,
+    save: (key, value) => Effect.suspend(() => {
+      if (key.endsWith(`:session:${descriptor.session}`) && failSave) {
+        failSave = false
+        return Effect.fail(AcpGateway.failure("Invalid"))
+      }
+      return base.save(key, value)
+    }),
+    remove: base.remove
+  }
+  const gateway = yield* GC.fromApi(apiFor(h.host), { workspace: "work", storage })
+  const remote = yield* Remote.make(gateway, { profile: "test" })
+  expect(code(yield* Effect.exit(remote.attach(descriptor)))).toBe("Invalid")
+  expect(detached).toBe(2)
+  const replacement = yield* remote.attach(descriptor, true)
+  expect(code(yield* Effect.exit(replacement.cancel))).toBe("success")
+  yield* replacement.release
+})))
+
 test("a stale descriptor is rejected and does not poison a later attachment", () => run(Effect.gen(function*() {
   const h = yield* hostedHarness(2)
   const original = yield* h.connection.newSession({ cwd: "/work" })
