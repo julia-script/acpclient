@@ -7,9 +7,8 @@ import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import * as Schema from "effect/Schema"
 
-const path = Effect.runSync(Effect.provide(Path.Path, Path.layer))
-export const root = path.join(import.meta.dir, "..", "..")
-export const manifestPath = path.join(import.meta.dir, "manifest.json")
+export const root = `${import.meta.dir}/../..`
+export const manifestPath = `${import.meta.dir}/manifest.json`
 
 export const ManifestInput = Schema.Struct({
   version: Schema.Int, surface: Schema.Literal("baseline"), path: Schema.String,
@@ -44,6 +43,7 @@ export class InputHashMismatch extends Data.TaggedError("InputHashMismatch")<{
 /** Reads one input relative to base, verifying its hash before parsing. */
 export const loadInput = (input: ManifestInput, base = root) => Effect.gen(function*() {
   const fs = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
   const bytes = yield* fs.readFile(path.join(base, input.path))
   const actual = yield* sha256(bytes)
   if (actual !== input.sha256) return yield* new InputHashMismatch(input.path, input.sha256, actual)

@@ -8,7 +8,7 @@ import * as Path from "effect/Path"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { failure } from "./support/failure.ts"
 import { emitModule, UnknownOverrideError, UnsupportedSchemaError } from "../scripts/codegen/emit.ts"
-import { generateAll, generateSource } from "../scripts/codegen/generate.ts"
+import { applyGenerated, generateAll, generateSource, GeneratedSchemaDrift } from "../scripts/codegen/generate.ts"
 import { InputHashMismatch, loadInput, loadManifest, root, sha256 } from "../scripts/codegen/inputs.ts"
 
 const path = Effect.runSync(Effect.provide(Path.Path, Path.layer))
@@ -156,6 +156,43 @@ describe("generation", () => {
     const found = Cause.findDefect(exit.cause)
     expect(Result.isSuccess(found)).toBe(true)
     if (Result.isSuccess(found)) expect(found.success).toBe(defect)
+  })))
+
+  test("drift and missing outputs fail through the typed channel without changing files", () => run(Effect.gen(function*() {
+    const fs = yield* FileSystem.FileSystem
+    const dir = yield* fs.makeTempDirectoryScoped({ prefix: "acp-codegen-output-" })
+    yield* fs.writeFileString(join(dir, "stale.ts"), "old")
+    const error = yield* failure(applyGenerated([
+      { output: "stale.ts", source: "new" },
+      { output: "missing.ts", source: "new" }
+    ], true, dir))
+    expect(error).toBeInstanceOf(GeneratedSchemaDrift)
+    expect(error).toMatchObject({ outputs: ["stale.ts", "missing.ts"] })
+    expect(yield* fs.readFileString(join(dir, "stale.ts"))).toBe("old")
+  })))
+
+  test("the executable edge exits on typed drift and unexpected defects", () => run(Effect.gen(function*() {
+    const fs = yield* FileSystem.FileSystem
+    const dir = yield* fs.makeTempDirectoryScoped({ prefix: "acp-codegen-process-" })
+    const source = [
+      `import * as BunRuntime from "@effect/platform-bun/BunRuntime"`,
+      `import * as BunServices from "@effect/platform-bun/BunServices"`,
+      `import * as Effect from "effect/Effect"`,
+      `import { applyGenerated } from "${join(root, "scripts/codegen/generate.ts")}"`,
+      `const output = process.argv.includes("--defect") ? Object.defineProperty({}, "output", { enumerable: true, get() { throw new Error("fixture defect") } }) : { output: "missing.ts", source: "new" }`,
+      `BunRuntime.runMain(Effect.suspend(() => applyGenerated([output as { output: string; source: string }], true, process.env.A27_BASE!)).pipe(Effect.provide(BunServices.layer)))`
+    ].join("\n")
+    const entry = join(dir, "process.ts")
+    yield* fs.symlink(join(root, "node_modules"), join(dir, "node_modules"))
+    yield* fs.writeFileString(entry, source)
+    const env = { ...process.env, A27_BASE: dir }
+    const drift = Bun.spawnSync(["bun", entry], { cwd: root, env })
+    expect(drift.exitCode).toBe(1)
+    expect(drift.stderr.toString() + drift.stdout.toString()).toContain("GeneratedSchemaDrift")
+    const defect = Bun.spawnSync(["bun", entry, "--defect"], { cwd: root, env })
+    expect(defect.exitCode).toBe(1)
+    expect(defect.stderr.toString() + defect.stdout.toString()).toContain("fixture defect")
+    expect(defect.stderr.toString() + defect.stdout.toString()).not.toContain("GeneratedSchemaDrift")
   })))
 
   test("drift check fails on a stale output", () => run(Effect.gen(function*() {
