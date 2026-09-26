@@ -62,7 +62,10 @@ describe("newline framing", () => {
   })
 
   test("invalid UTF-8 and truncated input are explicit framing failures", () => {
-    expect(Framing.makeDecoder(10).push(Uint8Array.of(0xff, 10)).error).toMatchObject({ reason: "InvalidFrame" })
+    const decoded = Framing.makeDecoder(10).push(Uint8Array.of(97, 10, 0xff, 10))
+    expect(decoded.frames).toEqual(["a"])
+    expect(decoded.error).toMatchObject({ _tag: "AcpTransportError", reason: "InvalidFrame" })
+    expect(decoded.error?.cause).toBeInstanceOf(TypeError)
     const truncated = Framing.makeDecoder(10)
     truncated.push(bytes(`{"a"`))
     expect(truncated.end()).toMatchObject({ reason: "InvalidFrame" })

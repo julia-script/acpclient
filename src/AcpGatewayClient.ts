@@ -10,17 +10,28 @@ import * as Layer from "effect/Layer"
 import * as RpcClient from "effect/unstable/rpc/RpcClient"
 import * as RpcSerialization from "effect/unstable/rpc/RpcSerialization"
 import * as Socket from "effect/unstable/socket/Socket"
+import * as Schema from "effect/Schema"
 import * as AcpGateway from "./AcpGateway.ts"
 
 /** Implement using browser storage or another application-controlled store. */
-export interface Storage {
+export interface Storage<SaveError = AcpGateway.GatewayError> {
   readonly load: (key: string) => Effect.Effect<unknown>
-  readonly save: (key: string, value: unknown) => Effect.Effect<void>
+  readonly save: (key: string, value: unknown) => Effect.Effect<void, SaveError>
   readonly remove: (key: string) => Effect.Effect<void>
 }
 export const memoryStorage = (): Storage => {
   const values = new Map<string, unknown>()
-  return { load: (key) => Effect.sync(() => values.get(key)), save: (key, value) => Effect.sync(() => { values.set(key, structuredClone(value)) }), remove: (key) => Effect.sync(() => { values.delete(key) }) }
+  return {
+    load: (key) => Effect.sync(() => values.get(key)),
+    save: (key, value) => Effect.try({
+      try: () => structuredClone(value),
+      catch: (cause) => new AcpGateway.GatewayError({
+        code: "Invalid",
+        message: `Failed to save gateway state at ${key}: ${String(cause)}`
+      })
+    }).pipe(Effect.flatMap((cloned) => Effect.sync(() => { values.set(key, cloned) }))),
+    remove: (key) => Effect.sync(() => { values.delete(key) })
+  }
 }
 type RpcApi = RpcClient.FromGroup<typeof AcpGateway.Gateway, import("effect/unstable/rpc/RpcClientError").RpcClientError>
 // Gateway operations always await replies and consume attachment Streams. The
@@ -34,8 +45,8 @@ const responseApi = (client: RpcApi) => ({
   Attach: (input: Parameters<RpcApi["Attach"]>[0]) => client.Attach(input)
 })
 export type Api = ReturnType<typeof responseApi>
-export interface Options { readonly workspace: string; readonly storage: Storage; readonly storageKey?: string; readonly disconnected?: Effect.Effect<void> }
-export const fromApi = (api: Api, options: Options) => Effect.gen(function*() {
+export interface Options<SaveError = AcpGateway.GatewayError> { readonly workspace: string; readonly storage: Storage<SaveError>; readonly storageKey?: string; readonly disconnected?: Effect.Effect<void> }
+export const fromApi = <SaveError>(api: Api, options: Options<SaveError>) => Effect.gen(function*() {
   const prefix = options.storageKey ?? `effect-acp:${options.workspace}`
   const saved = yield* options.storage.load(`${prefix}:identity`)
   const clientId = typeof saved === "string" ? saved : (yield* randomUUID.pipe(Effect.mapError(() => AcpGateway.failure("Invalid"))))
@@ -85,12 +96,11 @@ export const fromApi = (api: Api, options: Options) => Effect.gen(function*() {
     })), prefix, disconnected: options.disconnected ?? Effect.never, storage: options.storage, submit, wait, retry,
     command: (command: AcpGateway.Command, generation?: number) => submit(command, generation).pipe(Effect.filterOrElse((op) => op.status !== "admitted", (op) => wait(op.operationId))) }
 })
-import * as Schema from "effect/Schema"
 const importSchemaAdmission = (value: unknown) => Schema.decodeUnknownEffect(AcpGateway.Admission)(value).pipe(Effect.mapError(() => AcpGateway.failure("Invalid")))
-export type Client = Effect.Success<ReturnType<typeof fromApi>>
-export const make = (options: Options) => Effect.flatMap(RpcClient.make(AcpGateway.Gateway), (api) => fromApi(responseApi(api), options))
+export type Client<SaveError = AcpGateway.GatewayError> = Effect.Success<ReturnType<typeof fromApi<SaveError>>>
+export const make = <SaveError>(options: Options<SaveError>) => Effect.flatMap(RpcClient.make(AcpGateway.Gateway), (api) => fromApi(responseApi(api), options))
 /** One socket lifetime; reconnection is explicit and never resends ACP commands. */
-export const connect = (url: string, options: Options) => Effect.gen(function*() {
+export const connect = <SaveError>(url: string, options: Options<SaveError>) => Effect.gen(function*() {
   const scope = yield* Scope.Scope
   const disconnected = yield* Deferred.make<void>()
   yield* Effect.addFinalizer(() => Deferred.succeed(disconnected, undefined))

@@ -91,6 +91,7 @@ export interface Options<A> {
 export const defaultPath = "/acp"
 
 const unauthorized = HttpStatus.fromLiteral("Unauthorized")
+const badRequest = HttpStatus.fromLiteral("BadRequest")
 const forbidden = HttpStatus.fromLiteral("Forbidden")
 const upgradeRequired = HttpStatus.fromLiteral("UpgradeRequired")
 
@@ -150,9 +151,15 @@ const handler = <A>(options: Options<A>): Effect.Effect<
 
     // Parsed from the request URL rather than the `ParsedSearchParams` service
     // so mounting the route does not require that service in its context.
-    const selection = launchSelection(
-      HttpServerRequest.searchParamsFromURL(new URL(request.url, "http://localhost"))
-    )
+    const url = yield* Effect.try({
+      try: () => new URL(request.url, "http://localhost"),
+      catch: () => new Rejected({
+        status: badRequest,
+        message: "Invalid request URL",
+        reason: "launch"
+      })
+    })
+    const selection = launchSelection(HttpServerRequest.searchParamsFromURL(url))
     const launch = yield* options.resolveLaunch(principal, selection).pipe(
       Effect.mapError((rejected) =>
         rejected.status === undefined

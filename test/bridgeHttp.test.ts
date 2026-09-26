@@ -8,6 +8,7 @@ import { describe, expect, test } from "bun:test"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as HttpRouter from "effect/unstable/http/HttpRouter"
+import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { ChildProcessSpawner, make as makeSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import * as BridgeHttp from "../src/server/BridgeHttp.ts"
@@ -62,6 +63,29 @@ const upgradeRequest = (
 ) => new Request(url, { headers })
 
 describe("BridgeHttp route authorization", () => {
+  test("rejects a malformed request URL before launch or upgrade", () => Effect.runPromise(Effect.scoped(Effect.gen(function*() {
+    const spawner = trackingSpawner()
+    let launches = 0
+    const route = BridgeHttp.route({
+      authenticate: () => Effect.succeed(principal),
+      allowOrigin: () => true,
+      resolveLaunch: () => {
+        launches++
+        return Effect.succeed(allowedCommand)
+      }
+    })
+    const request = HttpServerRequest.fromWeb(upgradeRequest("http://localhost/acp"))
+      .modify({ url: "http://[" })
+    const response = yield* route.handler.pipe(
+      Effect.provideService(HttpServerRequest.HttpServerRequest, request),
+      Effect.provide(spawner.layer)
+    )
+
+    expect(response.status).toBe(400)
+    expect(launches).toBe(0)
+    expect(spawner.spawns).toEqual([])
+  }))))
+
   test("rejects a request that does not offer the required subprotocol without spawning", () => Effect.runPromise(Effect.gen(function*() {
     const spawner = trackingSpawner()
     const handler = handlerFor({ spawnerLayer: spawner.layer })

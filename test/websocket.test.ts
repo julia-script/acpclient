@@ -116,6 +116,16 @@ describe("WebSocket profile", () => {
       expect(ws.sent).toEqual([])
     }))))
 
+  test("a throwing WebSocket constructor fails as an Open transport error", () =>
+    Effect.runPromise(Effect.scoped(Effect.gen(function*() {
+      const thrown = new TypeError("invalid WebSocket URL")
+      const failure = yield* Effect.flip(WebSocket.make("ws://example.test/acp").pipe(
+        Effect.provideService(Socket.WebSocketConstructor, () => { throw thrown })
+      ))
+      expect(failure).toMatchObject({ _tag: "AcpTransportError", reason: "Open" })
+      expect(failure.cause).toBeDefined()
+    }))))
+
   test("a binary frame closes with unsupported-data and fails the incoming stream", () =>
     Effect.runPromise(Effect.scoped(Effect.gen(function*() {
       const ws = scriptable()
