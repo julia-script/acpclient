@@ -27,7 +27,6 @@ import * as Option from "effect/Option"
 import * as Cause from "effect/Cause"
 import * as Deferred from "effect/Deferred"
 import * as Duration from "effect/Duration"
-import * as Equal from "effect/Equal"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
@@ -305,8 +304,8 @@ const makeRuntime = Effect.fnUntraced(function*(
 interface Provisional {
   readonly _tag: "provisional"
   readonly buffered: Array<{ sessionId: string; update: unknown }>
+  replayHistory: boolean
   previous?: LiveRoute
-  replay?: { readonly history: ReadonlyArray<unknown>; index: number; matching: boolean }
   overflowed: boolean
   bytes: number
 }
@@ -386,19 +385,11 @@ const connect = Effect.fnUntraced(function*(options: ConnectOptions) {
       }
       if (route._tag === "live") return Effect.asVoid(route.runtime.apply({ _tag: "update", update }))
       buffer(route, sessionId, update)
-      if (route.previous === undefined) return Effect.void
-      const replay = route.replay
-      if (replay?.matching) {
-        // A history replay may omit non-conversation updates retained in raw.
-        for (let index = replay.index; index < replay.history.length; index++) {
-          if (Equal.equals(replay.history[index], update)) {
-            replay.index = index + 1
-            return Effect.void
-          }
-        }
-        replay.matching = false
-      }
-      return Effect.asVoid(route.previous.runtime.apply({ _tag: "update", update }))
+      // A replay notification has no marker distinguishing it from new live
+      // traffic. Keep the prior runtime unchanged through the response boundary.
+      return route.previous === undefined || route.replayHistory
+        ? Effect.void
+        : Effect.asVoid(route.previous.runtime.apply({ _tag: "update", update }))
     }))
 
   const sessionIdOf = (params: unknown): string | undefined =>
@@ -820,12 +811,12 @@ const connect = Effect.fnUntraced(function*(options: ConnectOptions) {
     knownSessionId: string | undefined,
     cwd: string,
     replayHistory: boolean,
-    request: (routeKey: string) => Effect.Effect<{ readonly sessionId: string; readonly result: V1.NewSessionResponse | V1.LoadSessionResponse | V1.ResumeSessionResponse | V2.NewSessionResponse | V2.ResumeSessionResponse }, E>
+    request: (routeKey: string, onResponseBoundary: Effect.Effect<void>) => Effect.Effect<{ readonly sessionId: string; readonly result: V1.NewSessionResponse | V1.LoadSessionResponse | V1.ResumeSessionResponse | V2.NewSessionResponse | V2.ResumeSessionResponse }, E>
   ) {
     // For `session/new` the id is not known until the response, so routing is
     // keyed on a placeholder until the live route can be committed.
     const routeKey = knownSessionId ?? localId("pending-session")
-    const provisional: Provisional = { _tag: "provisional", buffered: [], overflowed: false, bytes: 0 }
+    const provisional: Provisional = { _tag: "provisional", buffered: [], replayHistory, overflowed: false, bytes: 0 }
     const previousScope = yield* Semaphore.withPermit(routingLock, Effect.gen(function*() {
       const previous = knownSessionId === undefined ? undefined : routes.get(knownSessionId)
       const owned = knownSessionId === undefined ? undefined : sessionScopes.get(knownSessionId)
@@ -836,12 +827,6 @@ const connect = Effect.fnUntraced(function*(options: ConnectOptions) {
       }
       if (previous?._tag === "live" && owned !== undefined && owned.state._tag !== "Closed") {
         provisional.previous = previous
-        if (replayHistory && previousSnapshot !== undefined) {
-          // Replayed history follows the order of retained wire updates, but
-          // may omit updates that were never part of conversation history.
-          // Once a novel update arrives, forward the rest live.
-          provisional.replay = { history: previousSnapshot.raw.map((record) => record.update), index: 0, matching: true }
-        }
       }
       routes.set(routeKey, provisional)
       // Unknown ids are buffered until session/new supplies the real id.
@@ -865,9 +850,13 @@ const connect = Effect.fnUntraced(function*(options: ConnectOptions) {
     let promoted = false
     let candidateScope: Scope.Closeable | undefined
     return yield* Effect.gen(function*() {
-      // Drain on either outcome: notifications preceding a failed resume still
-      // belong to the live session and must not disappear with the attempt.
-      const outcome = yield* Effect.exit(request(routeKey).pipe(Effect.ensuring(Effect.ignore(connection.drainNotifications))))
+      // The connection inserts this marker between notifications before and
+      // after the lifecycle response, even when they share a JSON-RPC batch.
+      // After it, subsequent updates may safely reach the prior live runtime.
+      const onResponseBoundary = Semaphore.withPermit(routingLock, Effect.sync(() => {
+        if (routes.get(routeKey) === provisional) provisional.replayHistory = false
+      }))
+      const outcome = yield* Effect.exit(request(routeKey, onResponseBoundary).pipe(Effect.ensuring(Effect.ignore(connection.drainNotifications))))
       if (Exit.isFailure(outcome)) return yield* Effect.failCause(outcome.cause)
       const { result, sessionId } = outcome.value
 
@@ -883,7 +872,7 @@ const connect = Effect.fnUntraced(function*(options: ConnectOptions) {
           sessionScope
         )
         // Replay into the new runtime while the old live runtime remains
-        // available. During resume its updates were also applied live.
+        // available. Explicit history replay never mutates that old runtime.
         for (const entry of provisional.buffered) {
           if (entry.sessionId === sessionId) yield* runtime.apply({ _tag: "update", update: entry.update })
         }
@@ -966,11 +955,11 @@ const connect = Effect.fnUntraced(function*(options: ConnectOptions) {
         ...(version === 2 && sessionOptions.replayFrom !== undefined ? { replayFrom: sessionOptions.replayFrom } : {}) }
       return yield* establish(sessionOptions.sessionId, sessionOptions.cwd,
         version === 1 ? operation === "session/load" : sessionOptions.replayFrom !== undefined && sessionOptions.replayFrom !== null,
-        () => Effect.gen(function*() {
+        (_routeKey, onResponseBoundary) => Effect.gen(function*() {
           const invalid = (cause: Schema.SchemaError) => new AcpProtocolError({ message: "Invalid session resume params", cause })
           const result = version === 2
-            ? yield* request(V2.agentMethods["session/resume"], yield* Schema.decodeUnknownEffect(V2.ResumeSessionRequest)(input).pipe(Effect.mapError(invalid)))
-            : yield* request(V1.agentMethods[operation], yield* Schema.decodeUnknownEffect(V1.agentMethods[operation].params)(input).pipe(Effect.mapError(invalid)))
+            ? yield* request(V2.agentMethods["session/resume"], yield* Schema.decodeUnknownEffect(V2.ResumeSessionRequest)(input).pipe(Effect.mapError(invalid)), { onResponseBoundary })
+            : yield* request(V1.agentMethods[operation], yield* Schema.decodeUnknownEffect(V1.agentMethods[operation].params)(input).pipe(Effect.mapError(invalid)), { onResponseBoundary })
           return { sessionId: sessionOptions.sessionId, result }
         }))
     }))

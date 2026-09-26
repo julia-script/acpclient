@@ -919,7 +919,7 @@ describe("provisional routing bounds", () => {
 
   for (const version of [1, 2] as const) {
     for (const cursor of version === 2 ? ["start", "_cursor"] as const : ["start"] as const) {
-      test(`v${version} failed ${cursor} replay keeps only fresh updates on the prior route`, () =>
+      test(`v${version} failed ${cursor} replay leaves prior history unchanged`, () =>
         run(Effect.gen(function*() {
           const { agent, connection, session } = yield* withSession(version, resumeOptions(version))
           const observed = yield* session.observe
@@ -934,12 +934,17 @@ describe("provisional routing bounds", () => {
           const method = version === 1 ? "session/load" : "session/resume"
           yield* agent.awaitRequest(method)
           yield* agent.update("sess-1", { sessionUpdate: "agent_message_chunk", ...(version === 2 ? { messageId: "history" } : {}), content: text("history") })
+          yield* agent.update("sess-1", { sessionUpdate: "agent_message_chunk", ...(version === 2 ? { messageId: "history" } : {}), content: text("history") })
           yield* agent.update("sess-1", { sessionUpdate: "agent_message_chunk", ...(version === 2 ? { messageId: "fresh" } : {}), content: text("fresh") })
           yield* agent.respondError(method, -32603, "replay failed")
           expect(causeOf(yield* Fiber.await(resuming))).toContain("replay failed")
           const content = (yield* session.snapshot).messages.flatMap((message) => message.content)
           expect(content.filter((part) => "text" in part && part.text === "history")).toHaveLength(1)
-          expect(content.filter((part) => "text" in part && part.text === "fresh")).toHaveLength(1)
+          expect(content.filter((part) => "text" in part && part.text === "fresh")).toHaveLength(0)
+          const observedAfter = yield* session.observe
+          yield* agent.update("sess-1", { sessionUpdate: "agent_message_chunk", ...(version === 2 ? { messageId: "after-failure" } : {}), content: text("after-failure") })
+          yield* Stream.runCollect(Stream.take(Stream.filter(observedAfter.changes, (event) => hasText(event.snapshot, "after-failure")), 1))
+          expect(hasText(yield* session.snapshot, "after-failure")).toBe(true)
         })))
     }
 
@@ -994,6 +999,64 @@ describe("provisional routing bounds", () => {
         expect(hasText(yield* current.snapshot, "resume-replay")).toBe(true)
         yield* previous.release
         yield* expectLiveRoute(agent, current, version, `after-success-v${version}`)
+      })))
+  }
+
+  test("an update after a failed replay response reaches the prior runtime", () =>
+    run(Effect.gen(function*() {
+      const { agent, connection, session } = yield* withSession(2, resumeOptions(2))
+      const resuming = yield* Effect.forkChild(connection.resumeSession({ sessionId: "sess-1", cwd: "/work", replayFrom: { type: "start" } }))
+      yield* agent.awaitRequest("session/resume")
+      const request = (yield* agent.received).find((message) => message.method === "session/resume")!
+      yield* agent.send([
+        { jsonrpc: "2.0", id: request.id, error: { code: -32603, message: "replay failed" } },
+        { jsonrpc: "2.0", method: "session/update", params: {
+          sessionId: "sess-1", update: { sessionUpdate: "agent_message_chunk", messageId: "after-response", content: text("after-response") }
+        } }
+      ])
+      expect(causeOf(yield* Fiber.await(resuming))).toContain("replay failed")
+      yield* until(Effect.map(session.snapshot, (snapshot) => hasText(snapshot, "after-response")))
+      const content = (yield* session.snapshot).messages.flatMap((message) => message.content)
+      expect(content.filter((part) => "text" in part && part.text === "after-response")).toHaveLength(1)
+    })))
+
+  test("failed replay does not duplicate history evicted from raw updates", () =>
+    run(Effect.gen(function*() {
+      const { agent, connection, session } = yield* withSession(2, {
+        ...resumeOptions(2), connect: { limits: { rawUpdates: 1 } }
+      })
+      const observed = yield* session.observe
+      for (const value of ["A", "B"]) {
+        yield* agent.update("sess-1", { sessionUpdate: "agent_message_chunk", messageId: value, content: text(value) })
+      }
+      yield* Stream.runCollect(Stream.take(Stream.filter(observed.changes, (event) => hasText(event.snapshot, "B")), 1))
+      expect((yield* session.snapshot).raw).toHaveLength(1)
+
+      const resuming = yield* Effect.forkChild(connection.resumeSession({ sessionId: "sess-1", cwd: "/work", replayFrom: { type: "start" } }))
+      yield* agent.awaitRequest("session/resume")
+      for (const value of ["A", "B"]) {
+        yield* agent.update("sess-1", { sessionUpdate: "agent_message_chunk", messageId: value, content: text(value) })
+      }
+      yield* agent.respondError("session/resume", -32603, "replay failed")
+      expect(causeOf(yield* Fiber.await(resuming))).toContain("replay failed")
+      const content = (yield* session.snapshot).messages.flatMap((message) => message.content)
+      for (const value of ["A", "B"]) {
+        expect(content.filter((part) => "text" in part && part.text === value)).toHaveLength(1)
+      }
+    })))
+
+  for (const version of [1, 2] as const) {
+    test(`v${version} successful explicit replay promotes the buffered candidate`, () =>
+      run(Effect.gen(function*() {
+        const { agent, connection, session: previous } = yield* withSession(version, resumeOptions(version))
+        const resuming = yield* Effect.forkChild(connection.resumeSession({ sessionId: "sess-1", cwd: "/work", replayFrom: { type: "start" } }))
+        const method = version === 1 ? "session/load" : "session/resume"
+        yield* agent.awaitRequest(method)
+        yield* agent.update("sess-1", { sessionUpdate: "agent_message_chunk", ...(version === 2 ? { messageId: "replayed" } : {}), content: text("replayed") })
+        yield* agent.respond(method, {})
+        const current = yield* Fiber.join(resuming)
+        expect(hasText(yield* current.snapshot, "replayed")).toBe(true)
+        expect(hasText(yield* previous.snapshot, "replayed")).toBe(false)
       })))
   }
 
