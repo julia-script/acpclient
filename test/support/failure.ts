@@ -10,3 +10,13 @@ export const failure = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<
     const error = Cause.findErrorOption(exit.cause)
     return Option.isSome(error) ? Effect.succeed(error.value) : Effect.die(Cause.squash(exit.cause))
   })
+
+/** Assert that an exit contains exactly one typed failure and no defect or interruption. */
+export const singleFailureOf = (exit: Exit.Exit<unknown, unknown>): unknown => {
+  if (Exit.isSuccess(exit)) throw new Error("Expected a failed exit")
+  const [reason] = exit.cause.reasons
+  if (exit.cause.reasons.length !== 1 || reason === undefined || !Cause.isFailReason(reason)) {
+    throw new Error(`Expected exactly one typed failure: ${Cause.pretty(exit.cause)}`)
+  }
+  return reason.error
+}

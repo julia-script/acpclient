@@ -17,7 +17,6 @@ import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
 import * as Logger from "effect/Logger"
-import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
 import * as Sink from "effect/Sink"
 import * as Stdio from "effect/Stdio"
@@ -27,18 +26,27 @@ import * as Store from "../src/agent/Store.ts"
 import * as InMemory from "../src/transport/InMemory.ts"
 import * as ProcessStdio from "../src/transport/ProcessStdio.ts"
 import { driver } from "./support/driver.ts"
+import { singleFailureOf } from "./support/failure.ts"
 
 const run = <A, E>(effect: Effect.Effect<A, E, Scope.Scope | Store.Store>) =>
   Effect.scoped(effect).pipe(Effect.provide(Store.layer))
 
 const agentFailure = (exit: Exit.Exit<unknown, unknown>) => {
   if (Exit.isSuccess(exit)) throw new Error("Expected an agent failure")
-  const found = Cause.findErrorOption(exit.cause)
-  if (Option.isNone(found) || !(found.value instanceof AcpAgent.AcpAgentError)) {
+  const error = singleFailureOf(exit)
+  if (!(error instanceof AcpAgent.AcpAgentError)) {
     throw new Error(Cause.pretty(exit.cause))
   }
-  return found.value
+  return error
 }
+
+it("rejects a typed failure mixed with a defect", () => {
+  const exit = Effect.runSync(Effect.exit(
+    Effect.fail("expected").pipe(Effect.ensuring(Effect.die("probe defect")))
+  ))
+  expect(Exit.isFailure(exit) && exit.cause.reasons.map((reason) => reason._tag)).toEqual(["Fail", "Die"])
+  expect(() => singleFailureOf(exit)).toThrow("Expected exactly one typed failure")
+})
 
 /** Minimal handlers any test can start from. */
 const baseOptions = (): AcpAgent.Options => ({

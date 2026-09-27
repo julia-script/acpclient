@@ -1,5 +1,4 @@
 import { connectOptions } from "./connectOptions.ts"
-import * as Cause from "effect/Cause"
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
@@ -12,6 +11,7 @@ import type { AcpAgentConnection, AcpSession, ConnectOptions } from "../../src/A
 import { type ConnectError, AcpClient } from "../../src/AcpClient.ts"
 import * as AcpLocalClient from "../../src/AcpLocalClient.ts"
 import { type ScriptedAgent, scriptedAgent } from "./sessionAgent.ts"
+import { singleFailureOf } from "./failure.ts"
 
 const run = <A, E>(effect: Effect.Effect<A, E, Scope.Scope>) => Effect.scoped(effect)
 
@@ -52,12 +52,7 @@ export const awaitSnapshot = (session: AcpSession, predicate: (snapshot: Session
     return event.value.snapshot
   }))
 
-export const failureOf = (exit: Exit.Exit<unknown, unknown>): unknown => {
-  if (Exit.isSuccess(exit)) throw new Error("Expected a failed exit")
-  const error = Cause.findErrorOption(exit.cause)
-  if (Option.isNone(error)) throw new Error(Cause.pretty(exit.cause))
-  return error.value
-}
+export const failureOf = singleFailureOf
 
 /** A prompt-response body appropriate to the version. */
 export const promptResult = (version: 1 | 2) => version === 2 ? { messageId: "m-1" } : { stopReason: "end_turn" }
