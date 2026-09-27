@@ -33,7 +33,7 @@ export const hostedHarness = (version: 1 | 2, options: {
   let opens = 0
   const hostEffect = Host.make({ policy: { ...policy, ...options.policy },
     authorize: () => Effect.void,
-    onLifecycle: options.onLifecycle,
+    ...(options.onLifecycle === undefined ? {} : { onLifecycle: options.onLifecycle }),
     open: (_identity, _workspace, _profile, _options, enforced) => Effect.suspend(() => {
       opens++
       const client = opens === 1 ? Effect.succeed(local) : scriptedAgent({ version, ...options.agent }).pipe(Effect.flatMap((peer) => AcpClient.pipe(Effect.provide(Local.layer.pipe(Layer.provide(peer.connector))))))
@@ -65,7 +65,8 @@ export const hostedHarness = (version: 1 | 2, options: {
   } satisfies Host.Service
   const storage = GatewayClient.memoryStorage()
   const gateway = yield* GatewayClient.fromApi(apiFor(timed), { workspace: "work", storage })
-  const remote = yield* Remote.make(gateway, { profile: "test", observerCapacity: options.connect?.observerCapacity })
+  const remote = yield* Remote.make(gateway, { profile: "test",
+    ...(options.connect?.observerCapacity === undefined ? {} : { observerCapacity: options.connect.observerCapacity }) })
   const connection = yield* remote.connect(connectOptions(version))
   return { agent, connection, gateway, remote, host: timed, storage, opens: () => opens }
 })

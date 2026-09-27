@@ -738,8 +738,7 @@ const connect = Effect.fnUntraced(function*(options: ConnectOptions) {
         const route = routes.get(sessionId)
         const ownedRoute = route?._tag === "provisional" ? route.previous : route
         if (ownedRoute?.runtime !== runtime) return Effect.void
-        const resuming = route?._tag === "provisional"
-        if (resuming) route.previous = undefined
+        if (route?._tag === "provisional") delete route.previous
         else routes.delete(sessionId)
         const owned = sessionScopes.get(sessionId)
         sessionScopes.delete(sessionId)
@@ -895,8 +894,8 @@ const connect = Effect.fnUntraced(function*(options: ConnectOptions) {
         yield* runtime.apply({
           _tag: "lifecycle",
           cwd,
-          configOptions: result.configOptions,
-          modes: "modes" in result ? result.modes : undefined
+          ...(result.configOptions === undefined ? {} : { configOptions: result.configOptions }),
+          ...("modes" in result && result.modes !== undefined ? { modes: result.modes } : {})
         })
         if (sessionScope.state._tag === "Closed") {
           return yield* new AcpConnectionClosed({ message: "Connection closed while establishing session" })

@@ -560,10 +560,13 @@ const reduceV1Update = (
       )
     case "available_commands_update":
       if (!Schema.is(V1.AvailableCommandsUpdate)(update)) return snapshot
-      return { ...snapshot, commands: update.availableCommands.map((command) => ({
-        ...command,
-        input: command.input == null ? command.input : { ...command.input, type: "text" }
-      })) }
+      return { ...snapshot, commands: update.availableCommands.map((command) => {
+        const { input, ...rest } = command
+        return {
+          ...rest,
+          ...(input === undefined ? {} : { input: input === null ? null : { ...input, type: "text" as const } })
+        }
+      }) }
     case "current_mode_update":
       if (!Schema.is(V1.CurrentModeUpdate)(update)) return snapshot
       return {

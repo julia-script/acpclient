@@ -195,7 +195,7 @@ export const make = <R, E>(options: Options<R, E>) => Effect.gen(function*() {
     const controller = session.controller
     if (controller && !Queue.offerUnsafe(controller.queue, event)) {
       Queue.failCauseUnsafe(controller.queue, Cause.fail(AcpGateway.failure("ResyncRequired")))
-      session.controller = undefined
+      delete session.controller
       return yield* scheduleExpiry(session)
     }
   })
@@ -369,13 +369,13 @@ export const make = <R, E>(options: Options<R, E>) => Effect.gen(function*() {
     if (previous) yield* Queue.fail(previous.queue, AcpGateway.failure("StaleController"))
     yield* Effect.addFinalizer(() => Effect.gen(function*() {
       if (session.controller?.generation === generation) {
-        session.controller = undefined
+        delete session.controller
         yield* report("detached")
         if (!session.closing) yield* scheduleExpiry(session)
       }
       yield* Queue.shutdown(queue)
     }))
-    if (session.expiry) { const timer = session.expiry; session.expiry = undefined; yield* Fiber.interrupt(timer) }
+    if (session.expiry) { const timer = session.expiry; delete session.expiry; yield* Fiber.interrupt(timer) }
     yield* report("attached")
     return Stream.concat(Stream.fromIterable([initial, ...replay]), Stream.fromQueue(queue))
   }))

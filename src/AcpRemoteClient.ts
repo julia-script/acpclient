@@ -11,7 +11,7 @@ import * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import { SessionSnapshot, type SubmissionSnapshot } from "./AcpApp.ts"
-import { AcpClient, type AcpAgentConnection, type AcpSession, type Observation, type OperationError } from "./AcpClient.ts"
+import { AcpClient, type AcpAgentConnection, type AcpSession, type NewSessionOptions, type Observation, type OperationError } from "./AcpClient.ts"
 import { AcpConnectionClosed } from "./AcpError.ts"
 import * as AcpGateway from "./AcpGateway.ts"
 import type { Client } from "./AcpGatewayClient.ts"
@@ -245,13 +245,22 @@ export const make = (gateway: Client, options: Options) => Effect.gen(function*(
     }
     const connection = descriptor.connection
     const establish = (command: AcpGateway.Command) => run(command).pipe(Effect.flatMap((value) => Schema.decodeUnknownEffect(AcpGateway.SessionDescriptor)(value).pipe(Effect.mapError(() => AcpGateway.failure("Invalid")))), Effect.flatMap((descriptor) => Scope.provide(attach(descriptor), connectionScope)))
+    const sessionOptions = ({ cwd, additionalDirectories, mcpServers }: NewSessionOptions) => ({
+      cwd,
+      ...(additionalDirectories === undefined ? {} : { additionalDirectories }),
+      ...(mcpServers === undefined ? {} : { mcpServers })
+    })
     return {
       capabilities: descriptor.capabilities, negotiated: descriptor.negotiated,
       closed: Effect.raceFirst(Effect.asVoid(gateway.api.Closed({ epoch: gateway.window.epoch, workspace: gateway.window.workspace, connection })).pipe(Effect.ignore), gateway.disconnected).pipe(
         Effect.as(new AcpConnectionClosed({ message: "Hosted connection closed" }))),
       request: (method, params) => Effect.suspend(() => run({ _tag: "Extension", connection, method, params: params ?? null, controllers: Object.fromEntries(controllers) })),
-      newSession: (options) => establish({ _tag: "NewSession", connection, options }),
-      resumeSession: (options) => establish({ _tag: "ResumeSession", connection, options }),
+      newSession: (options) => establish({ _tag: "NewSession", connection, options: sessionOptions(options) }),
+      resumeSession: (options) => establish({ _tag: "ResumeSession", connection, options: {
+        ...sessionOptions(options),
+        sessionId: options.sessionId,
+        ...(options.replayFrom === undefined ? {} : { replayFrom: options.replayFrom })
+      } }),
       listSessions: (cwd) => network(gateway.api.List({ epoch: gateway.window.epoch, workspace: gateway.window.workspace, connection, ...(cwd ? { cwd } : {}) })),
       authenticate: (methodId) => Effect.asVoid(run({ _tag: "Authenticate", connection, methodId })),
       logout: Effect.asVoid(run({ _tag: "Logout", connection }))

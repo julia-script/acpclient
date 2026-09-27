@@ -60,7 +60,7 @@ const scriptable = (protocol: string = WebSocket.profile) => {
     close(code?: number, reason?: string) {
       ws.closeInfo = { code, reason }
       ws.readyState = 3
-      emit("close", { code, reason })
+      emit("close", { ...(code === undefined ? {} : { code }), ...(reason === undefined ? {} : { reason }) })
     },
     send(data: string | Uint8Array) {
       ws.sent.push(data)
@@ -73,7 +73,7 @@ const scriptable = (protocol: string = WebSocket.profile) => {
     },
     remoteClose(code: number, reason?: string) {
       ws.readyState = 3
-      ws.emit("close", { code, reason })
+      ws.emit("close", { code, ...(reason === undefined ? {} : { reason }) })
     }
   }
   const emit = ws.emit
