@@ -66,7 +66,7 @@ export interface RetainedMessage {
 
 /** Session and transcript persistence. */
 export class Store extends Context.Service<Store, {
-  /** Lists session metadata by lexical session ID, optionally filtered by working directory. */
+  /** Lists session metadata, optionally filtered by working directory. */
   readonly list: (cwd?: string | null) => Effect.Effect<ReadonlyArray<SessionRef>, StoreError>
   /** Reads a session, or `undefined` when it does not exist. */
   readonly get: (sessionId: string) => Effect.Effect<SessionRef | undefined, StoreError>
@@ -116,7 +116,8 @@ const emptyState = (): InMemoryState => ({ sessions: new Map(), retained: new Ma
 
 /**
  * A deterministic in-memory Store. Sessions and transcripts live for the
- * lifetime of the referenced service; nothing survives the process.
+ * lifetime of the referenced service; nothing survives the process. Its
+ * `list` method orders sessions lexically by session ID.
  */
 export const InMemory = Effect.gen(function*() {
   const state = yield* Ref.make(emptyState())
