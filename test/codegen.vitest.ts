@@ -139,12 +139,12 @@ describe("generation", () => {
     expect(result.failure).toMatchObject({ _tag: "UnknownOverrideError", definition: "Gone", version: 9 })
   })
 
-  it.live("generator effects fail through their typed channel", () => run(Effect.gen(function*() {
+  it.effect("generator effects fail through their typed channel", () => Effect.gen(function*() {
     const error = yield* failure(generateSource(document({ Name: { type: "string", maxLength: 3 } }), options))
     expect(error).toMatchObject({ _tag: "UnsupportedSchemaError", definition: "Name", construct: "maxLength" })
-  })))
+  }))
 
-  it.live("unexpected emitter defects remain defects", () => run(Effect.gen(function*() {
+  it.effect("unexpected emitter defects remain defects", () => Effect.gen(function*() {
     const defect = new Error("broken fixture getter")
     const definitions = { Overridden: { type: "number" }, ...envelopes }
     Object.defineProperty(definitions, "Broken", { enumerable: true, get: () => { throw defect } })
@@ -156,7 +156,7 @@ describe("generation", () => {
     const found = Cause.findDefect(exit.cause)
     expect(Result.isSuccess(found)).toBe(true)
     if (Result.isSuccess(found)) expect(found.success).toBe(defect)
-  })))
+  }))
 
   it.live("drift and missing outputs fail through the typed channel without changing files", () => run(Effect.gen(function*() {
     const fs = yield* FileSystem.FileSystem

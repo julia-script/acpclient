@@ -9,7 +9,7 @@ import * as Host from "../src/AcpHost.ts"
 import * as GatewayHttp from "../src/server/GatewayHttp.ts"
 import { policy } from "./support/host.ts"
 
-for (const denial of ["origin", "authentication"] as const) it.live(`gateway rejects ${denial} before upgrading or launching`, () => Effect.gen(function*() {
+for (const denial of ["origin", "authentication"] as const) it.effect(`gateway rejects ${denial} before upgrading or launching`, () => Effect.gen(function*() {
   let launches = 0
   const route = GatewayHttp.route({ allowOrigin: () => denial !== "origin",
     authenticate: () => Effect.fail(Gateway.failure("Unauthorized")) })
@@ -23,7 +23,7 @@ for (const denial of ["origin", "authentication"] as const) it.live(`gateway rej
   } finally { (yield* Effect.promise(() => app.dispose()))}
 }))
 
-it.live("gateway authentication defects are logged with their cause and return only 401", () => Effect.gen(function*() {
+it.effect("gateway authentication defects are logged with their cause and return only 401", () => Effect.gen(function*() {
   const defect = new Error("private auth secret")
   const logs: Array<Logger.Options<unknown>> = []
   const logger = Logger.make<unknown, void>((entry) => { logs.push(entry) })
