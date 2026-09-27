@@ -255,12 +255,21 @@ describe("batches", () => {
 
   it.effect("all-notification batch gets no response", () =>
     run(Effect.gen(function*() {
-      const { peer } = yield* harness({ handlers })
+      const processed = yield* Deferred.make<void>()
+      let handled = 0
+      const { peer } = yield* harness({ handlers: AcpConnection.handlers([
+        AcpConnection.onRequest(Echo, ({ text }) => Effect.succeed({ text })),
+        AcpConnection.onNotification(Ping, () => Effect.sync(() => ++handled).pipe(
+          Effect.flatMap((count) => count === 2 ? Deferred.succeed(processed, undefined) : Effect.void)
+        ))
+      ]) })
       yield* peer.send([{ jsonrpc: "2.0", method: "test/ping", params: { n: 1 } }, {
         jsonrpc: "2.0",
         method: "test/ping",
         params: { n: 2 }
       }])
+      yield* Deferred.await(processed)
+      expect(handled).toBe(2)
       expect(yield* pollNoFrame(peer, 100)).toEqual(Option.none())
     })))
 

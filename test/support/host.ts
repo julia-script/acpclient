@@ -31,7 +31,7 @@ export const hostedHarness = (version: 1 | 2, options: {
   const agent = yield* scriptedAgent({ version, ...options.agent })
   const local = yield* AcpClient.pipe(Effect.provide(Local.layer.pipe(Layer.provide(agent.connector))))
   let opens = 0
-  const host = yield* Host.make({ policy: { ...policy, ...options.policy },
+  const hostEffect = Host.make({ policy: { ...policy, ...options.policy },
     authorize: () => Effect.void,
     onLifecycle: options.onLifecycle,
     open: (_identity, _workspace, _profile, _options, enforced) => Effect.suspend(() => {
@@ -53,6 +53,7 @@ export const hostedHarness = (version: 1 | 2, options: {
         )
       }))
     }) })
+  const host = yield* (options.clock === undefined ? hostEffect : hostEffect.pipe(Effect.provideService(Clock.Clock, options.clock)))
   const timed = options.clock === undefined ? host : {
     ...host,
     hello: (...args: Parameters<typeof host.hello>) => host.hello(...args).pipe(Effect.provideService(Clock.Clock, options.clock!)),

@@ -229,15 +229,19 @@ for (const version of [1, 2] as const) {
 
 it.live("detached interactions expire as cancellation, never approval", () => run(Effect.gen(function*() {
   const clock = yield* TestClock.make()
-  const h = yield* hostedHarness(2, { clock, policy: { interactionMs: 25 } })
+  const h = yield* hostedHarness(2, { clock, policy: { interactionMs: 60_000, retentionMs: 120_000, retryMs: 180_000 } })
   const handle = yield* h.connection.newSession({ cwd: "/work" })
   const descriptor = h.remote.descriptor(handle)!
   yield* h.agent.send({ jsonrpc: "2.0", id: "permission", method: "session/request_permission", params: { sessionId: "sess-1", title: "Approve?", options: [{ optionId: "allow", name: "Allow", kind: "allow_once" }] } })
   yield* waitForSnapshot(handle, (s) => Object.keys(s.interactions).length === 1)
   const id = Object.keys((yield* handle.snapshot).interactions)[0]!
   yield* handle.release
-  yield* clock.adjust("25 millis")
-  yield* h.agent.awaitReply("permission")
+  const reply = yield* h.agent.awaitReply("permission").pipe(Effect.forkChild)
+  expect(reply.pollUnsafe()).toBeUndefined()
+  yield* clock.adjust("59 seconds")
+  expect(reply.pollUnsafe()).toBeUndefined()
+  yield* clock.adjust("1 second")
+  expect(yield* Fiber.join(reply)).toMatchObject({ result: { outcome: { outcome: "cancelled" } } })
   const restored = yield* h.remote.attach(descriptor)
   expect((yield* restored.snapshot).interactions[id]!.status).toBe("expired")
   expect(yield* Effect.flip(restored.resolveInteraction(id, { _tag: "selected", optionId: "allow" }))).toMatchObject({ _tag: "AcpInteractionExpired" })
