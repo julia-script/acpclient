@@ -13,6 +13,19 @@ class Config extends Context.Service<Config, { readonly url: string }>()("test/T
 class ConfigError extends Data.TaggedError("ConfigError")<{ readonly message: string }> {}
 
 describe("transport acquisition contracts", () => {
+  it("keeps the original explicit service type argument", () => {
+    const acquire: Effect.Effect<AcpTransport.Transport, AcpTransportError, Config> = Effect.as(
+      Effect.service(Config),
+      {} as AcpTransport.Transport
+    )
+
+    expect(AcpTransport.layer<Config>(acquire)).type.toBe<Layer.Layer<
+      AcpTransport.AcpTransport,
+      AcpTransportError,
+      Config
+    >>()
+  })
+
   it("retains custom acquisition errors and services", () => {
     const acquire = Effect.flatMap(Effect.service(Config), () => Effect.fail(new ConfigError({ message: "acquisition failed" })))
     const scopedAcquire = Effect.flatMap(Scope.Scope, () => acquire)

@@ -33,7 +33,7 @@ export interface Transport {
 export class AcpTransport extends Context.Service<AcpTransport, Transport>()("effect-acp/AcpTransport") {}
 
 /** Builds a transport layer from a scoped adapter acquisition. */
-export const layer = <E, R>(
+export const layer = <R, E = AcpTransportError>(
   acquire: Effect.Effect<Transport, E, R>
 ): Layer.Layer<AcpTransport, E, Exclude<R, Scope.Scope>> =>
   Layer.effect(AcpTransport, acquire)
