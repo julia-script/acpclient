@@ -132,6 +132,26 @@ for (const version of [1, 2] as const) {
   })))
 }
 
+for (const version of [1, 2] as const) {
+  test(`v${version} released session handles cannot send new commands`, () => run(Effect.gen(function*() {
+    const { agent, session } = yield* withSession(version)
+    yield* session.release
+    expect(causeOf(yield* Effect.exit(session.submit([text("after release")])))).toContain("AcpConnectionClosed")
+    expect(causeOf(yield* Effect.exit(session.cancel))).toContain("AcpConnectionClosed")
+    const sent = yield* agent.received
+    expect(sent.filter((message) => message.method === "session/prompt" || message.method === "session/cancel")).toHaveLength(0)
+  })))
+
+  test(`v${version} releasing a session settles its admitted submission`, () => run(Effect.gen(function*() {
+    const { agent, session } = yield* withSession(version)
+    const submission = yield* session.submit([text("held")])
+    const outcome = yield* Effect.exit(submission.outcome).pipe(Effect.forkChild)
+    yield* agent.awaitRequest("session/prompt")
+    yield* session.release
+    expect(causeOf(yield* Fiber.join(outcome).pipe(Effect.timeout("200 millis")))).toContain("AcpConnectionClosed")
+  })))
+}
+
 test("v2 accepted remains successful when ownership ends before the turn completes", () => run(Effect.gen(function*() {
   const owner = yield* Scope.make()
   const { agent, session } = yield* Scope.provide(withSession(2), owner)

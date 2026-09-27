@@ -601,14 +601,21 @@ const connect = Effect.fnUntraced(function*(options: ConnectOptions) {
   // Session handle
   // ---------------------------------------------------------------------------
 
-  const makeSession = (runtime: Runtime): AcpSession => {
+  const makeSession = (runtime: Runtime, sessionScope: Scope.Closeable): AcpSession => {
     // One admitted foreground submission at a time. `takeIfAvailable` makes
     // the check-and-claim atomic, so two concurrent submits cannot both win.
     const foreground = Semaphore.makeUnsafe(1)
     const sessionId = runtime.sessionId
+    const ensureLive = Effect.suspend(() => {
+      const route = routes.get(sessionId)
+      const current = route?._tag === "provisional" ? route.previous : route
+      return current?.runtime === runtime && sessionScopes.get(sessionId) === sessionScope && sessionScope.state._tag !== "Closed"
+        ? Effect.void
+        : Effect.fail(new AcpConnectionClosed({ message: `Session ${sessionId} released` }))
+    })
 
     const submit = (prompt: Parameters<AcpSession["submit"]>[0]) =>
-      Effect.gen(function*() {
+      Effect.andThen(ensureLive, Effect.gen(function*() {
         if (!capabilities.session.prompt) return yield* unsupported("session/prompt")
         const unsupportedBlock = prompt.find((block) => !Capability.contentSupported(capabilities, block))
         if (unsupportedBlock !== undefined) {
@@ -630,7 +637,7 @@ const connect = Effect.fnUntraced(function*(options: ConnectOptions) {
           // call returns: the session stays busy for the whole turn.
           Effect.tapCause(() => Semaphore.release(foreground, 1))
         )
-      }).pipe(Effect.forkIn(scope), Effect.flatMap(Fiber.join))
+      }).pipe(Effect.forkIn(sessionScope), Effect.flatMap(Fiber.join)))
 
     const dispatch = (prompt: Parameters<AcpSession["submit"]>[0]) =>
       Effect.gen(function*() {
@@ -708,7 +715,7 @@ const connect = Effect.fnUntraced(function*(options: ConnectOptions) {
           }),
           Effect.ensuring(Semaphore.release(foreground, 1)))
 
-        yield* Effect.forkIn(settle, scope, { startImmediately: true })
+        yield* Effect.forkIn(settle, sessionScope, { startImmediately: true })
 
         return {
           id,
@@ -740,6 +747,7 @@ const connect = Effect.fnUntraced(function*(options: ConnectOptions) {
       changes: Stream.unwrap(Effect.map(runtime.observe, (observed) => observed.changes)),
       submit,
       cancel: Effect.gen(function*() {
+        yield* ensureLive
         const state = yield* runtime.current
         yield* Effect.forEach(Object.values(state.interactions).filter((i) => i.status === "pending"),
           (i) => runtime.settle(i.interactionId, "cancelled", cancelledOutcome(i.kind, version)), { discard: true })
@@ -759,6 +767,7 @@ const connect = Effect.fnUntraced(function*(options: ConnectOptions) {
       }),
       resolveInteraction: (interactionId, resolution) =>
         Effect.gen(function*() {
+          yield* ensureLive
           const snapshot = yield* runtime.current
           const interaction = Object.hasOwn(snapshot.interactions, interactionId) ? snapshot.interactions[interactionId] : undefined
           if (interaction === undefined || interaction.status !== "pending") {
@@ -779,22 +788,28 @@ const connect = Effect.fnUntraced(function*(options: ConnectOptions) {
           // Lost the race with another caller: exactly one resolution is sent.
           if (!settled) return yield* new AcpInteractionAlreadyResolved({ interactionId })
         }),
-      setConfigOption: (configId, value) =>
-        capabilities.session.setConfigOption
-          ? request(version === 2 ? V2.agentMethods["session/set_config_option"] : V1.agentMethods["session/set_config_option"], typeof value === "boolean" ? { sessionId, configId, type: "boolean", value } : { sessionId, configId, ...(version === 2 ? { type: "id" } : {}), value }).pipe(
-            Effect.flatMap((result) => runtime.apply({ _tag: "lifecycle", configOptions: result.configOptions })), Effect.asVoid)
-          : unsupported("session/set_config_option"),
+      setConfigOption: (configId, value) => Effect.gen(function*() {
+        yield* ensureLive
+        if (!capabilities.session.setConfigOption) return yield* unsupported("session/set_config_option")
+        yield* request(version === 2 ? V2.agentMethods["session/set_config_option"] : V1.agentMethods["session/set_config_option"], typeof value === "boolean" ? { sessionId, configId, type: "boolean", value } : { sessionId, configId, ...(version === 2 ? { type: "id" } : {}), value }).pipe(
+          Effect.flatMap((result) => runtime.apply({ _tag: "lifecycle", configOptions: result.configOptions })))
+      }),
       setMode: (modeId) => Effect.gen(function*() {
+        yield* ensureLive
         if (version !== 1 || !(yield* runtime.current).config["acp/modes"]) return yield* unsupported("session/set_mode")
         yield* request(V1.agentMethods["session/set_mode"], { sessionId, modeId })
         yield* runtime.apply({ _tag: "update", update: { sessionUpdate: "current_mode_update", currentModeId: modeId } })
       }),
-      close: capabilities.session.close
-        ? Effect.asVoid(request(version === 2 ? V2.agentMethods["session/close"] : V1.agentMethods["session/close"], { sessionId }))
-        : unsupported("session/close"),
-      delete: capabilities.session.delete
-        ? Effect.asVoid(request(version === 2 ? V2.agentMethods["session/delete"] : V1.agentMethods["session/delete"], { sessionId }))
-        : unsupported("session/delete")
+      close: Effect.gen(function*() {
+        yield* ensureLive
+        if (!capabilities.session.close) return yield* unsupported("session/close")
+        yield* request(version === 2 ? V2.agentMethods["session/close"] : V1.agentMethods["session/close"], { sessionId })
+      }),
+      delete: Effect.gen(function*() {
+        yield* ensureLive
+        if (!capabilities.session.delete) return yield* unsupported("session/delete")
+        yield* request(version === 2 ? V2.agentMethods["session/delete"] : V1.agentMethods["session/delete"], { sessionId })
+      })
     }
   }
 
@@ -891,7 +906,7 @@ const connect = Effect.fnUntraced(function*(options: ConnectOptions) {
         routes.set(sessionId, { _tag: "live", runtime })
         promoted = true
         if (owned !== undefined) yield* Scope.close(owned, Exit.void)
-        return makeSession(runtime)
+        return makeSession(runtime, sessionScope)
       }))
     }).pipe(Effect.onExit(() => promoted ? Effect.void : Effect.andThen(
       cleanup,
