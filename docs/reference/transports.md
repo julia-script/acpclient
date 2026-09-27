@@ -8,6 +8,8 @@ Scope: `AcpTransport`, `AcpConnector`, transport implementations, and `server/Br
 
 `AcpConnector.layer(transportLayer)` provides a scoped factory. Each acquisition builds a fresh transport layer, so opening two connections does not reuse one process or socket through layer memoization. The factory captures dependencies such as `ChildProcessSpawner`; construction alone does not start a process.
 
+`AcpTransport.layer(acquire)` retains the acquisition Effect's error and service types. `WebSocket.make` and `WebSocket.layer` also accept a URL Effect and retain its error and service types; their socket I/O errors remain `AcpTransportError`. A connector's later `connect` call has the fixed `AcpTransportError` contract, so supply a transport layer with that error type when using `AcpConnector.layer`.
+
 ## Implementations
 
 | Module under `effect-acp/transport/` | Service constructor | Required platform service | Lifetime |

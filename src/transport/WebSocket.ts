@@ -159,10 +159,10 @@ export const fromSocket = <E, R>(
  * The connection is opened once; a missing/mismatched subprotocol, socket
  * failure, or scope release is terminal.
  */
-export const make = (
-  url: string | Effect.Effect<string>,
+export const make = <E = never, R = never>(
+  url: string | Effect.Effect<string, E, R>,
   options: Options = {}
-): Effect.Effect<Transport, AcpTransportError, Socket.WebSocketConstructor | Scope.Scope> =>
+): Effect.Effect<Transport, AcpTransportError | E, Socket.WebSocketConstructor | Scope.Scope | R> =>
   Effect.gen(function*() {
     const constructor = yield* Socket.WebSocketConstructor
     const resolved = typeof url === "string" ? url : yield* url
@@ -243,10 +243,10 @@ const selected = (ws: Socket.WebSocketLike): Effect.Effect<Socket.WebSocketLike,
 }
 
 /** A scoped WebSocket implementation of AcpTransport. */
-export const layer = (
-  url: string | Effect.Effect<string>,
+export const layer = <E = never, R = never>(
+  url: string | Effect.Effect<string, E, R>,
   options?: Options
-): Layer.Layer<AcpTransport, AcpTransportError, Socket.WebSocketConstructor> =>
+): Layer.Layer<AcpTransport, AcpTransportError | E, Socket.WebSocketConstructor | Exclude<R, Scope.Scope>> =>
   Layer.effect(AcpTransport, make(url, options))
 
 /** Uses an injected accepted socket, e.g. after an HTTP upgrade. */
