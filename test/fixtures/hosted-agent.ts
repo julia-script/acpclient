@@ -22,4 +22,6 @@ const agent = Agent.make({
     })
   }
 })
-Effect.runFork(Effect.scoped(Effect.flatMap(agent, Agent.serveStdio)).pipe(Effect.provide(Layer.mergeAll(Store.layer, BunServices.layer))))
+if (import.meta.main) {
+  Effect.runFork(Effect.scoped(Effect.flatMap(agent, Agent.serveStdio)).pipe(Effect.provide(Layer.mergeAll(Store.layer, BunServices.layer))))
+}

@@ -1,18 +1,19 @@
-import { expect, test } from "bun:test"
+import { fileURLToPath } from "node:url"
+import { expect, it } from "@effect/vitest"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 
-test("documentation checker reports malformed URI escapes as a diagnostic", () =>
-  Effect.runPromise(Effect.scoped(Effect.gen(function*() {
+it.live("documentation checker reports malformed URI escapes as a diagnostic", () =>
+  Effect.scoped(Effect.gen(function*() {
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
     const root = yield* fs.makeTempDirectoryScoped({ prefix: "acp-docs-" })
     yield* fs.makeDirectory(path.join(root, "scripts"))
     yield* fs.makeDirectory(path.join(root, "docs"))
-    yield* fs.copyFile(path.resolve(import.meta.dir, "../scripts/check-docs.ts"), path.join(root, "scripts/check-docs.ts"))
-    yield* fs.symlink(path.resolve(import.meta.dir, "../node_modules"), path.join(root, "node_modules"))
+    yield* fs.copyFile(path.resolve(fileURLToPath(new URL(".", import.meta.url)), "../scripts/check-docs.ts"), path.join(root, "scripts/check-docs.ts"))
+    yield* fs.symlink(path.resolve(fileURLToPath(new URL(".", import.meta.url)), "../node_modules"), path.join(root, "node_modules"))
     yield* fs.writeFileString(path.join(root, "README.md"), "[bad](bad%ZZ.md)\n")
     const child = Bun.spawn([process.execPath, path.join(root, "scripts/check-docs.ts")], {
       cwd: root,
@@ -26,5 +27,5 @@ test("documentation checker reports malformed URI escapes as a diagnostic", () =
     ]))
     expect(status).not.toBe(0)
     expect(stderr + stdout).toContain("README.md: invalid link URI bad%ZZ.md")
-  })).pipe(Effect.provide(BunServices.layer)))
+  })).pipe(Effect.provide(BunServices.layer))
 )

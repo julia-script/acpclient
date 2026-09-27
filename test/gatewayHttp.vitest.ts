@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test"
+import { expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Logger from "effect/Logger"
@@ -9,7 +9,7 @@ import * as Host from "../src/AcpHost.ts"
 import * as GatewayHttp from "../src/server/GatewayHttp.ts"
 import { policy } from "./support/host.ts"
 
-for (const denial of ["origin", "authentication"] as const) test(`gateway rejects ${denial} before upgrading or launching`, () => Effect.runPromise(Effect.gen(function*() {
+for (const denial of ["origin", "authentication"] as const) it.live(`gateway rejects ${denial} before upgrading or launching`, () => Effect.gen(function*() {
   let launches = 0
   const route = GatewayHttp.route({ allowOrigin: () => denial !== "origin",
     authenticate: () => Effect.fail(Gateway.failure("Unauthorized")) })
@@ -21,9 +21,9 @@ for (const denial of ["origin", "authentication"] as const) test(`gateway reject
     expect(response.status).toBe(denial === "origin" ? 403 : 401)
     expect(launches).toBe(0)
   } finally { (yield* Effect.promise(() => app.dispose()))}
-})))
+}))
 
-test("gateway authentication defects are logged with their cause and return only 401", () => Effect.runPromise(Effect.gen(function*() {
+it.live("gateway authentication defects are logged with their cause and return only 401", () => Effect.gen(function*() {
   const defect = new Error("private auth secret")
   const logs: Array<Logger.Options<unknown>> = []
   const logger = Logger.make<unknown, void>((entry) => { logs.push(entry) })
@@ -40,4 +40,4 @@ test("gateway authentication defects are logged with their cause and return only
     expect(Cause.isDieReason(diagnostic[0]!.cause.reasons[0]!)).toBe(true)
     expect(diagnostic[0]!.cause.reasons[0]).toMatchObject({ defect })
   } finally { yield* Effect.promise(() => app.dispose()) }
-})))
+}))

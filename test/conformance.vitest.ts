@@ -1,12 +1,11 @@
 import * as Schema from "effect/Schema"
 import { field } from "./support/field.ts"
 import { failure } from "./support/failure.ts"
-import * as Json from "../src/internal/json.ts"
 /**
  * Foundation conformance scenarios, run against the independent fixture agent
  * for both protocol versions over both in-memory and stdio compositions.
  */
-import { describe, expect, test } from "bun:test"
+import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Scope from "effect/Scope"
@@ -18,7 +17,7 @@ import type { AgentOptions } from "./fixtures/agent.ts"
 import { type Compose, inMemory, stdio } from "./support/compositions.ts"
 import { isStandardFrame } from "./support/driver.ts"
 
-const run = <A, E>(effect: Effect.Effect<A, E, Scope.Scope>) => Effect.runPromise(Effect.scoped(effect))
+const run = <A, E>(effect: Effect.Effect<A, E, Scope.Scope>) => Effect.scoped(effect)
 
 const policy = (version: 1 | 2): AcpProtocol.InitializeOptions =>
   version === 1
@@ -63,8 +62,10 @@ const open = (compose: Compose, agent: AgentOptions, options = policy(agent.vers
 const compositions: ReadonlyArray<readonly [string, Compose]> = [["in-memory", inMemory], ["stdio", stdio]]
 
 for (const [name, compose] of compositions) {
+  // The process composition needs live time; the in-memory peer uses test services.
+  const check = name === "stdio" ? it.live : it.effect
   describe(`conformance over ${name}`, () => {
-    test("v1 by default, opt-in v2, and v2 preference downgrading to v1", () =>
+    check("v1 by default, opt-in v2, and v2 preference downgrading to v1", () =>
       run(Effect.gen(function*() {
         expect((yield* open(compose, { version: 1 })).negotiated.version).toBe(1)
         expect((yield* open(compose, { version: 2 })).negotiated.version).toBe(2)
@@ -73,18 +74,18 @@ for (const [name, compose] of compositions) {
         expect(downgraded.negotiated.advertised.version).toBe(2)
       })), 20_000)
 
-    test("unsupported version fails and releases the agent", () =>
+    check("unsupported version fails and releases the agent", () =>
       run(Effect.gen(function*() {
         const composition = yield* compose({ version: 2, mode: "unsupported" })
-        const exit = yield* Effect.exit(Effect.scoped(
+        const error = yield* failure(Effect.scoped(
           AcpProtocol.connect(policy(2)).pipe(Effect.provide(composition.connector))
         ))
-        expect(Exit.isFailure(exit) && (yield* Json.encode(exit.cause))).toContain("AcpUnsupportedVersion")
+        expect(error).toMatchObject({ _tag: "AcpUnsupportedVersion" })
         yield* composition.released
       })), 20_000)
 
     for (const version of [1, 2] as const) {
-      test(`v${version}: reverse request with a colliding id during a prompt, plus ordered notifications`, () =>
+      check(`v${version}: reverse request with a colliding id during a prompt, plus ordered notifications`, () =>
         run(Effect.gen(function*() {
           const { connection, negotiated, updates } = yield* open(compose, { version })
           expect(negotiated.version).toBe(version)
@@ -103,12 +104,14 @@ for (const [name, compose] of compositions) {
               prompt: [{ type: "text", text: "hi" }]
             })
             expect(result).toEqual({ messageId: "m-1", _meta: { optionId: "allow" } })
-            for (let i = 0; i < 100 && updates.length < 2; i++) yield* Effect.sleep("10 millis")
+            for (let i = 0; i < 100 && updates.length < 2; i++) {
+              yield* name === "stdio" ? Effect.sleep("10 millis") : Effect.yieldNow
+            }
             expect(updates).toEqual(["agent_message_chunk", "state_update"])
           }
         })), 20_000)
 
-      test(`v${version}: malformed JSON, unknown methods, and mixed batches get JSON-RPC answers`, () =>
+      check(`v${version}: malformed JSON, unknown methods, and mixed batches get JSON-RPC answers`, () =>
         run(Effect.gen(function*() {
           const { connection } = yield* open(compose, { version })
           const report = yield* Effect.flatMap(connection.send("_fixture/malformed", {}), (p) => p.response)
@@ -123,7 +126,7 @@ for (const [name, compose] of compositions) {
           })
         })), 20_000)
 
-      test(`v${version}: request cancellation is confirmed by the agent`, () =>
+      check(`v${version}: request cancellation is confirmed by the agent`, () =>
         run(Effect.gen(function*() {
           const { connection } = yield* open(compose, { version })
           const pending = yield* connection.send("_fixture/slow", {})
@@ -131,7 +134,7 @@ for (const [name, compose] of compositions) {
           expect(yield* failure(pending.response)).toMatchObject({ _tag: "AcpRemoteError", code: -32800 })
         })), 20_000)
 
-      test(`v${version}: only standard JSON-RPC reaches the wire`, () =>
+      check(`v${version}: only standard JSON-RPC reaches the wire`, () =>
         run(Effect.gen(function*() {
           const { connection } = yield* open(compose, { version })
           const pending = yield* connection.send("_fixture/slow", {})
@@ -143,7 +146,7 @@ for (const [name, compose] of compositions) {
           for (const line of lines) expect({ line, standard: isStandardFrame(line) }).toEqual({ line, standard: true })
         })), 20_000)
 
-      test(`v${version}: agent exit fails pending calls and releases resources`, () =>
+      check(`v${version}: agent exit fails pending calls and releases resources`, () =>
         run(Effect.gen(function*() {
           const { connection, composition } = yield* open(compose, { version })
           const pending = yield* connection.send("_fixture/slow", {})
@@ -154,7 +157,7 @@ for (const [name, compose] of compositions) {
           yield* composition.released
         })), 20_000)
 
-      test(`v${version}: closing the owner scope settles pending calls and releases the agent`, () =>
+      check(`v${version}: closing the owner scope settles pending calls and releases the agent`, () =>
         run(Effect.gen(function*() {
           const { connection, composition, scope } = yield* open(compose, { version })
           const pending = yield* connection.send("_fixture/slow", {})

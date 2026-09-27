@@ -2,7 +2,7 @@ import * as Effect from "effect/Effect"
 import * as Result from "effect/Result"
 import * as Cause from "effect/Cause"
 import * as Exit from "effect/Exit"
-import { describe, expect, test } from "bun:test"
+import { describe, expect, it } from "@effect/vitest"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import * as BunServices from "@effect/platform-bun/BunServices"
@@ -13,10 +13,10 @@ import { InputHashMismatch, loadInput, loadManifest, root, sha256 } from "../scr
 
 const path = Effect.runSync(Effect.provide(Path.Path, Path.layer))
 const join = (...segments: string[]) => path.join(...segments)
-const run = <A, E>(effect: Effect.Effect<A, E, BunServices.BunServices | import("effect/Scope").Scope>) => Effect.runPromise(Effect.scoped(effect).pipe(Effect.provide(BunServices.layer)))
+const run = <A, E>(effect: Effect.Effect<A, E, BunServices.BunServices | import("effect/Scope").Scope>) => Effect.scoped(effect).pipe(Effect.provide(BunServices.layer))
 
 describe("schema provenance", () => {
-  test("manifest hashes match the reviewed hashes in ARCHITECTURE.md and the vendored files", () => run(Effect.gen(function*() {
+  it.live("manifest hashes match the reviewed hashes in ARCHITECTURE.md and the vendored files", () => run(Effect.gen(function*() {
     const fs = yield* FileSystem.FileSystem
     const manifest = (yield* loadManifest())
     const architecture = (yield* fs.readFileString(join(root, "ARCHITECTURE.md")))
@@ -29,7 +29,7 @@ describe("schema provenance", () => {
     }
   })))
 
-  test("an altered input is rejected", () => run(Effect.gen(function*() {
+  it.live("an altered input is rejected", () => run(Effect.gen(function*() {
     const fs = yield* FileSystem.FileSystem
     const manifest = (yield* loadManifest())
     const input = manifest.inputs[0]!
@@ -47,7 +47,7 @@ describe("schema provenance", () => {
 })
 
 describe("generation", () => {
-  test("repeated generation is identical and matches checked-in outputs", () => run(Effect.gen(function*() {
+  it.live("repeated generation is identical and matches checked-in outputs", () => run(Effect.gen(function*() {
     const fs = yield* FileSystem.FileSystem
     const first = (yield* generateAll)
     const second = (yield* generateAll)
@@ -69,7 +69,7 @@ describe("generation", () => {
     ["ClientRequest", "AgentRequest", "AgentResponse", "ClientResponse", "ClientNotification", "AgentNotification"].map((n) => [n, {}])
   )
 
-  test("unsupported constructs return structured diagnostics", () => {
+  it("unsupported constructs return structured diagnostics", () => {
     for (const [defs, definition, construct] of [
       [{ Name: { type: "string", maxLength: 3 } }, "Name", "maxLength"],
       [{ Obj: { type: "object", properties: { a: { if: {} } } } }, "Obj", "if"],
@@ -85,7 +85,7 @@ describe("generation", () => {
     }
   })
 
-  test("annotations and extensions are ignored; overrides replace emission", () => {
+  it("annotations and extensions are ignored; overrides replace emission", () => {
     const result = emit({ Name: { type: "string", format: "uri", description: "d", "x-anything": 1 } })
     expect(Result.isSuccess(result)).toBe(true)
     if (Result.isFailure(result)) throw result.failure
@@ -96,7 +96,7 @@ describe("generation", () => {
     expect(Result.isSuccess(emit({}))).toBe(true)
   })
 
-  test("schema names and property keys never resolve through prototypes", () => {
+  it("schema names and property keys never resolve through prototypes", () => {
     const missing = emit({ Ref: { $ref: "#/$defs/toString" } })
     expect(Result.isFailure(missing)).toBe(true)
     if (Result.isSuccess(missing)) throw new Error("Expected unknown reference")
@@ -127,7 +127,7 @@ describe("generation", () => {
     expect(method.success).toContain("[\"__proto__\"]: AcpSchema.request(\"__proto__\", Request, Response)")
   })
 
-  test("a stale override is a typed diagnostic with its definition and version", () => {
+  it("a stale override is a typed diagnostic with its definition and version", () => {
     const result = emitModule({ $defs: envelopes }, {
       manifest: { generator: "t", upstream: { repository: "t", revision: "t" } },
       input: { version: 9, surface: "baseline", path: "f", sha256: "0", output: "x" },
@@ -139,12 +139,12 @@ describe("generation", () => {
     expect(result.failure).toMatchObject({ _tag: "UnknownOverrideError", definition: "Gone", version: 9 })
   })
 
-  test("generator effects fail through their typed channel", () => run(Effect.gen(function*() {
+  it.live("generator effects fail through their typed channel", () => run(Effect.gen(function*() {
     const error = yield* failure(generateSource(document({ Name: { type: "string", maxLength: 3 } }), options))
     expect(error).toMatchObject({ _tag: "UnsupportedSchemaError", definition: "Name", construct: "maxLength" })
   })))
 
-  test("unexpected emitter defects remain defects", () => run(Effect.gen(function*() {
+  it.live("unexpected emitter defects remain defects", () => run(Effect.gen(function*() {
     const defect = new Error("broken fixture getter")
     const definitions = { Overridden: { type: "number" }, ...envelopes }
     Object.defineProperty(definitions, "Broken", { enumerable: true, get: () => { throw defect } })
@@ -158,7 +158,7 @@ describe("generation", () => {
     if (Result.isSuccess(found)) expect(found.success).toBe(defect)
   })))
 
-  test("drift and missing outputs fail through the typed channel without changing files", () => run(Effect.gen(function*() {
+  it.live("drift and missing outputs fail through the typed channel without changing files", () => run(Effect.gen(function*() {
     const fs = yield* FileSystem.FileSystem
     const dir = yield* fs.makeTempDirectoryScoped({ prefix: "acp-codegen-output-" })
     yield* fs.writeFileString(join(dir, "stale.ts"), "old")
@@ -171,7 +171,7 @@ describe("generation", () => {
     expect(yield* fs.readFileString(join(dir, "stale.ts"))).toBe("old")
   })))
 
-  test("the executable edge exits on typed drift and unexpected defects", () => run(Effect.gen(function*() {
+  it.live("the executable edge exits on typed drift and unexpected defects", () => run(Effect.gen(function*() {
     const fs = yield* FileSystem.FileSystem
     const dir = yield* fs.makeTempDirectoryScoped({ prefix: "acp-codegen-process-" })
     const source = [
@@ -186,28 +186,23 @@ describe("generation", () => {
     yield* fs.symlink(join(root, "node_modules"), join(dir, "node_modules"))
     yield* fs.writeFileString(entry, source)
     const env = { ...process.env, A27_BASE: dir }
-    const drift = Bun.spawnSync(["bun", entry], { cwd: root, env })
+    const drift = Bun.spawnSync([process.execPath, entry], { cwd: root, env })
     expect(drift.exitCode).toBe(1)
     expect(drift.stderr.toString() + drift.stdout.toString()).toContain("GeneratedSchemaDrift")
-    const defect = Bun.spawnSync(["bun", entry, "--defect"], { cwd: root, env })
+    const defect = Bun.spawnSync([process.execPath, entry, "--defect"], { cwd: root, env })
     expect(defect.exitCode).toBe(1)
     expect(defect.stderr.toString() + defect.stdout.toString()).toContain("fixture defect")
     expect(defect.stderr.toString() + defect.stdout.toString()).not.toContain("GeneratedSchemaDrift")
   })))
 
-  test("drift check fails on a stale output", () => run(Effect.gen(function*() {
+  it.live("drift check fails on a stale output", () => run(Effect.gen(function*() {
     const fs = yield* FileSystem.FileSystem
-    const { output } = ((yield* generateAll))[0]!
-    const path = join(root, output)
-    const original = (yield* fs.readFileString(path))
-    try {
-      yield* fs.writeFileString(path, original + "// drift\n")
-      const run = Bun.spawnSync(["bun", "scripts/codegen/generate.ts", "--check"], { cwd: root })
-      expect(run.exitCode).toBe(1)
-      expect(run.stderr.toString() + run.stdout.toString()).toContain(output)
-    } finally {
-      yield* fs.writeFileString(path, original)
-    }
-    expect(Bun.spawnSync(["bun", "scripts/codegen/generate.ts", "--check"], { cwd: root }).exitCode).toBe(0)
+    const { output, source } = (yield* generateAll)[0]!
+    const dir = yield* fs.makeTempDirectoryScoped({ prefix: "acp-codegen-drift-" })
+    yield* fs.makeDirectory(path.dirname(join(dir, output)), { recursive: true })
+    yield* fs.writeFileString(join(dir, output), source + "// drift\n")
+    const error = yield* failure(applyGenerated([{ output, source }], true, dir))
+    expect(error).toMatchObject({ _tag: "GeneratedSchemaDrift", outputs: [output] })
+    expect(yield* fs.readFileString(join(dir, output))).toBe(source + "// drift\n")
   })))
 })

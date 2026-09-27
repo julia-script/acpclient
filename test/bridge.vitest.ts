@@ -5,11 +5,13 @@ import * as Json from "../src/internal/json.ts"
  * opaque extension/batch handling, exactly-once release, and stalled-consumer
  * failure. Uses paired in-memory transports on both sides.
  */
-import { describe, expect, test } from "bun:test"
+import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as Fiber from "effect/Fiber"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
+import * as TestClock from "effect/testing/TestClock"
 import * as AcpBridge from "../src/AcpBridge.ts"
 import type { Transport } from "../src/AcpTransport.ts"
 import * as InMemory from "../src/transport/InMemory.ts"
@@ -18,7 +20,7 @@ import { driver } from "./support/driver.ts"
 const run = <A, E>(effect: Effect.Effect<A, E, Scope.Scope>, timeoutMs?: number) => {
   const scoped = Effect.scoped(effect)
   const bound = timeoutMs === undefined ? scoped : Effect.timeout(scoped, `${timeoutMs} millis`)
-  return Effect.runPromise(bound)
+  return bound
 }
 
 const setup = (options: { pressureDeadline?: Parameters<typeof AcpBridge.make>[0]["pressureDeadline"] } = {}) =>
@@ -57,7 +59,7 @@ const setup = (options: { pressureDeadline?: Parameters<typeof AcpBridge.make>[0
   })
 
 describe("AcpBridge", () => {
-  test("forwards responses, requests, notifications, and batches in both directions with ids intact", () =>
+  it.effect("forwards responses, requests, notifications, and batches in both directions with ids intact", () =>
     run(Effect.gen(function*() {
       const { browser, peer } = yield* setup()
 
@@ -89,7 +91,7 @@ describe("AcpBridge", () => {
       expect(yield* peer.next).toEqual(batch)
     }), 10_000))
 
-  test("unknown extension frames and malformed JSON cross verbatim and uninterpreted", () =>
+  it.effect("unknown extension frames and malformed JSON cross verbatim and uninterpreted", () =>
     run(Effect.gen(function*() {
       const { browser, peer } = yield* setup()
       const extension = `{"jsonrpc":"2.0","id":42,"method":"x/vendor/custom","params":{"meta":{"deep":[1,2,{"z":true}]},"blob":"<>&","n":null}}`
@@ -98,30 +100,30 @@ describe("AcpBridge", () => {
       expect(peer.received.at(-1)).toBe(extension)
 
       yield* browser.send("{not valid json]")
-      for (let i = 0; i < 200 && !peer.received.includes("{not valid json]"); i++) yield* Effect.sleep("5 millis")
+      for (let i = 0; i < 200 && !peer.received.includes("{not valid json]"); i++) yield* Effect.yieldNow
       expect(peer.received.includes("{not valid json]")).toBe(true)
 
       yield* peer.send(`"bare string frame"`)
       expect(yield* browser.poll()).toMatchObject({ _tag: "Some", value: "bare string frame" })
     }), 10_000))
 
-  test("preserves per-direction order across many frames and interleaved directions", () =>
+  it.effect("preserves per-direction order across many frames and interleaved directions", () =>
     run(Effect.gen(function*() {
       const { browser, peer } = yield* setup()
       for (let i = 0; i < 25; i++) yield* browser.send({ jsonrpc: "2.0", id: i, method: "m", params: { i } })
-      while (peer.received.length < 25) yield* Effect.sleep("5 millis")
+      while (peer.received.length < 25) yield* Effect.yieldNow
       expect((yield* Effect.forEach(peer.received, (frame) => Json.decode(frame))).map((value) => field(value, "id"))).toEqual(
         Array.from({ length: 25 }, (_, i) => i)
       )
 
       for (let i = 0; i < 25; i++) yield* peer.send({ jsonrpc: "2.0", id: 100 + i, method: "m" })
-      while (browser.received.length < 25) yield* Effect.sleep("5 millis")
+      while (browser.received.length < 25) yield* Effect.yieldNow
       expect((yield* Effect.forEach(browser.received, (frame) => Json.decode(frame))).map((value) => field(value, "id"))).toEqual(
         Array.from({ length: 25 }, (_, i) => 100 + i)
       )
     }), 10_000))
 
-  test("a browser disconnect releases both owned transports exactly once and reports closure", () =>
+  it.effect("a browser disconnect releases both owned transports exactly once and reports closure", () =>
     run(Effect.gen(function*() {
       const { bridge, peer, releases, disconnectBrowser } = yield* setup()
       yield* disconnectBrowser
@@ -135,7 +137,7 @@ describe("AcpBridge", () => {
       expect(releases()).toBe(1)
     }), 10_000))
 
-  test("a stalled downstream write fails after the pressure deadline and releases both sides", () =>
+  it.effect("a stalled downstream write fails after the pressure deadline and releases both sides", () =>
     run(Effect.gen(function*() {
       const browserPair = yield* InMemory.make()
       const browserClient = yield* browserPair.left
@@ -152,7 +154,10 @@ describe("AcpBridge", () => {
       })
 
       yield* browserClient.send(`{"jsonrpc":"2.0","id":1,"method":"session/prompt"}`)
-      const reason = yield* bridge.closed
+      const closed = yield* Effect.forkChild(bridge.closed)
+      yield* Effect.yieldNow
+      yield* TestClock.adjust("40 millis")
+      const reason = yield* Fiber.join(closed)
       expect(reason.message).toContain("pressure deadline")
       expect(reason.side).toBe("browser")
       expect(releases).toBe(1)
@@ -161,7 +166,7 @@ describe("AcpBridge", () => {
       void browserDriver
     }), 10_000))
 
-  test("terminate() is idempotent and reports the explicit reason once", () =>
+  it.effect("terminate() is idempotent and reports the explicit reason once", () =>
     run(Effect.gen(function*() {
       const { bridge, releases } = yield* setup()
       yield* bridge.terminate("operator closed", "peer")

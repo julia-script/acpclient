@@ -1,24 +1,25 @@
-import { describe, expect, test } from "bun:test"
+import { fileURLToPath } from "node:url"
+import { describe, expect, it } from "@effect/vitest"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 
 const run = <A, E>(effect: Effect.Effect<A, E, BunServices.BunServices | import("effect/Scope").Scope>) =>
-  Effect.runPromise(Effect.scoped(effect).pipe(Effect.provide(BunServices.layer)))
+  Effect.scoped(effect).pipe(Effect.provide(BunServices.layer))
 
 describe("browser check executable", () => {
-  test("importing the script does not start a check", () => {
-    const result = Bun.spawnSync(["bun", "-e", 'await import("./scripts/check-browser.ts")'], { cwd: import.meta.dir + "/.." })
+  it.live("importing the script does not start a check", () => Effect.sync(() => {
+    const result = Bun.spawnSync([process.execPath, "-e", 'await import("./scripts/check-browser.ts")'], { cwd: fileURLToPath(new URL(".", import.meta.url)) + "/.." })
     expect(result.exitCode).toBe(0)
     expect(result.stdout.toString()).toBe("")
     expect(result.stderr.toString()).toBe("")
-  })
+  }))
 
-  test("a forbidden browser import fails the subprocess", () => run(Effect.gen(function*() {
+  it.live("a forbidden browser import fails the subprocess", () => run(Effect.gen(function*() {
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
-    const root = path.resolve(import.meta.dir, "..")
+    const root = path.resolve(fileURLToPath(new URL(".", import.meta.url)), "..")
     const dir = yield* fs.makeTempDirectoryScoped({ prefix: "acp-browser-fixture-" })
     yield* fs.makeDirectory(path.join(dir, "scripts"))
     yield* fs.makeDirectory(path.join(dir, "src"))
@@ -28,7 +29,7 @@ describe("browser check executable", () => {
     yield* fs.writeFileString(path.join(dir, "src/Bad.ts"), 'import "node:fs"\nexport const bad = true\n')
     yield* fs.writeFileString(path.join(dir, "dist/Bad.js"), 'export const good = true\n')
     yield* fs.writeFileString(path.join(dir, "scripts/check-browser.ts"), yield* fs.readFileString(path.join(root, "scripts/check-browser.ts")))
-    const result = Bun.spawnSync(["bun", "scripts/check-browser.ts"], { cwd: dir })
+    const result = Bun.spawnSync([process.execPath, "scripts/check-browser.ts"], { cwd: dir })
     expect(result.exitCode).toBe(1)
     expect(result.stderr.toString() + result.stdout.toString()).toContain("browser entry imports node:fs")
   })))
