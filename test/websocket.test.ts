@@ -6,6 +6,7 @@ import * as Json from "../src/internal/json.ts"
  * `bridge-http.test.ts`.
  */
 import { describe, expect, test } from "bun:test"
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
@@ -182,8 +183,11 @@ describe("WebSocket profile", () => {
       const ws = scriptable()
       const owner = yield* Scope.fork(yield* Scope.Scope)
       const transport = yield* Scope.provide(WebSocket.fromSocket(socketFrom(ws)), owner)
-      const consumer = yield* Effect.forkDetach(collect(transport.incoming))
+      const started = yield* Deferred.make<void>()
+      const consumer = yield* Effect.forkDetach(collect(Stream.tap(transport.incoming, () => Deferred.succeed(started, undefined))))
 
+      ws.message("ready")
+      yield* Deferred.await(started).pipe(Effect.timeout("1 second"))
       yield* Scope.close(owner, Exit.void)
       const exit = yield* Fiber.await(consumer).pipe(
         Effect.timeout("1 second"),
