@@ -1,6 +1,6 @@
 import * as Effect from "effect/Effect"
 import * as Result from "effect/Result"
-import { describe, expect, test } from "bun:test"
+import { describe, expect, it } from "@effect/vitest"
 import * as Exit from "effect/Exit"
 import * as Schema from "effect/Schema"
 import * as V1 from "../src/protocol/v1/Schema.ts"
@@ -88,7 +88,7 @@ const fixtures: ReadonlyArray<readonly [1 | 2, string, unknown, boolean]> = [
 
 describe("generated codecs match the source-dialect validator", () => {
   for (const [version, definition, value, valid] of fixtures) {
-    test(`v${version} ${definition} ${JSON.stringify(value)} is ${valid ? "valid" : "invalid"}`, () =>
+    it(`v${version} ${definition} ${JSON.stringify(value)} is ${valid ? "valid" : "invalid"}`, () =>
       conforms(version, definition, value, valid))
   }
 })
@@ -131,18 +131,18 @@ describe("unions, intersections, and fallback variants", () => {
     [2, "CreateElicitationRequest", { mode: "future", sessionId: "s" }, false]
   ]
   for (const [version, definition, value, valid] of cases) {
-    test(`v${version} ${definition} ${JSON.stringify(value)} is ${valid ? "valid" : "invalid"}`, () =>
+    it(`v${version} ${definition} ${JSON.stringify(value)} is ${valid ? "valid" : "invalid"}`, () =>
       conforms(version, definition, value, valid))
   }
 
-  test("a malformed known variant reports the variant's own failure", () => {
+  it("a malformed known variant reports the variant's own failure", () => {
     const exit = decode(2, "ContentBlock", { type: "text", text: 1 })
     expect(Exit.isFailure(exit)).toBe(true)
   })
 })
 
 describe("patch semantics", () => {
-  test("omitted, null, and concrete values stay distinct through a round trip", () => {
+  it("omitted, null, and concrete values stay distinct through a round trip", () => {
     const updates = [
       { sessionUpdate: "tool_call_update", toolCallId: "t" },
       { sessionUpdate: "tool_call_update", toolCallId: "t", content: null, title: null },
@@ -158,7 +158,7 @@ describe("patch semantics", () => {
 })
 
 describe("versioned contracts", () => {
-  test("v1 completion and v2 insertion acknowledgement are distinct contracts", () => {
+  it("v1 completion and v2 insertion acknowledgement are distinct contracts", () => {
     const v1 = { stopReason: "end_turn" } satisfies V1.PromptResponse
     const v2 = { messageId: "m-1" } satisfies V2.PromptResponse
     expect(Schema.decodeResult(V1.PromptResponse)(v1)).toEqual(Result.succeed(v1))
@@ -169,7 +169,7 @@ describe("versioned contracts", () => {
     expect(V2.agentMethods["session/prompt"].result).toBe(V2.PromptResponse)
   })
 
-  test("method maps cover the upstream method metadata", () => Effect.runPromise(Effect.gen(function*() {
+  it.live("method maps cover the upstream method metadata", () => Effect.gen(function*() {
     for (const [version, module] of [[1, V1], [2, V2]] as const) {
       const meta = yield* Effect.promise(() => Bun.file(`repos/agent-client-protocol/schema/v${version}/meta.json`).text()).pipe(
         Effect.flatMap(Schema.decodeEffect(Schema.fromJsonString(Schema.Struct({
@@ -184,5 +184,5 @@ describe("versioned contracts", () => {
     }
     expect(V2.agentMethods["session/cancel"]._tag).toBe("Notification")
     expect(V2.clientMethods["session/request_permission"]._tag).toBe("Request")
-  })))
+  }))
 })

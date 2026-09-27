@@ -10,14 +10,16 @@
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 
+/** Attach a definition name while checking its declared type against the codec. */
+export const def = <T>(identifier: string, schema: Schema.Codec<T>): Schema.Codec<T> =>
+  schema.annotate({ identifier })
+
 /**
- * Correlates two outputs of the pinned JSON Schema generator: its explicit TS
- * type and its runtime codec. JSON Schema `allOf`/`not` are runtime refinements
- * which TypeScript cannot infer. This is the sole generated-code trust boundary;
- * inputs are context-free identity codecs, and oracle tests check the generated
- * validators against the pinned upstream schemas, including round trips.
+ * JSON Schema `allOf` and `not` filter values at runtime, but their TypeScript
+ * result is broader than the intersection/refinement emitted from the source.
+ * The generator uses this cast only for definitions containing those keywords.
  */
-export const def = <T>(identifier: string, schema: Schema.Codec<unknown>): Schema.Codec<T> =>
+export const refinedDef = <T>(identifier: string, schema: Schema.Codec<unknown>): Schema.Codec<T> =>
   schema.annotate({ identifier }) as Schema.Codec<T>
 
 /** JSON Schema `integer`: any finite number without a fractional part. */

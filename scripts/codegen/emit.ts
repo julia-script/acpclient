@@ -82,6 +82,8 @@ type Node = Readonly<Record<string, unknown>>
 interface Emitted {
   readonly ts: string
   readonly schema: string
+  /** A nested allOf/not prevents Effect from inferring the full declared type. */
+  readonly refined?: boolean
 }
 
 const isNode = (u: unknown): u is Node => typeof u === "object" && u !== null && !Array.isArray(u)
@@ -135,10 +137,10 @@ class Emitter {
 
     let result: Emitted = { ts: "unknown", schema: "Schema.Unknown" }
     if (parts.length === 1) result = parts[0]!
-    if (parts.length > 1) result = { ts: parts.map((p) => `(${p.ts})`).join(" & "), schema: `Wire.allOf(\n  ${parts.map((p) => indent(p.schema)).join(",\n  ")}\n)` }
+    if (parts.length > 1) result = { ts: parts.map((p) => `(${p.ts})`).join(" & "), schema: `Wire.allOf(\n  ${parts.map((p) => indent(p.schema)).join(",\n  ")}\n)`, refined: true }
     if (input.not !== undefined) {
       const excluded = this.node(input.not)
-      result = { ts: result.ts, schema: `Wire.not(\n  ${indent(result.schema)},\n  ${indent(excluded.schema)}\n)` }
+      result = { ts: result.ts, schema: `Wire.not(\n  ${indent(result.schema)},\n  ${indent(excluded.schema)}\n)`, refined: true }
     }
     return result
   }
@@ -162,7 +164,8 @@ class Emitter {
     if (emitted.length === 1) return emitted[0]!
     return {
       ts: unionType(emitted.map((e) => e.ts)),
-      schema: `Schema.Union([\n  ${emitted.map((e) => indent(e.schema)).join(",\n  ")}\n]${mode === "oneOf" ? `, { mode: "oneOf" }` : ""})`
+      schema: `Schema.Union([\n  ${emitted.map((e) => indent(e.schema)).join(",\n  ")}\n]${mode === "oneOf" ? `, { mode: "oneOf" }` : ""})`,
+      refined: emitted.some((e) => e.refined)
     }
   }
 
@@ -187,7 +190,8 @@ class Emitter {
     const branches = types.map((t) => this.typed(input, t))
     return branches.length === 1 ? branches[0] : {
       ts: branches.map((b) => b.ts).join(" | "),
-      schema: `Schema.Union([${branches.map((b) => b.schema).join(", ")}])`
+      schema: `Schema.Union([${branches.map((b) => b.schema).join(", ")}])`,
+      refined: branches.some((b) => b.refined)
     }
   }
 
@@ -211,7 +215,7 @@ class Emitter {
       case "array": {
         const item = input.items === undefined ? { ts: "unknown", schema: "Schema.Unknown" } : this.node(input.items)
         const checks = input.minItems !== undefined ? [`Schema.isMinLength(${this.number(input.minItems, "minItems")})`] : []
-        return { ts: `ReadonlyArray<${item.ts}>`, schema: withChecks(`Schema.Array(${item.schema})`, checks) }
+        return { ts: `ReadonlyArray<${item.ts}>`, schema: withChecks(`Schema.Array(${item.schema})`, checks), refined: item.refined }
       }
       case "object":
         return this.object(input)
@@ -239,7 +243,7 @@ class Emitter {
     if (additional !== undefined && additional !== true) {
       if (keys.length > 0) this.fail("additionalProperties", "a constrained additionalProperties alongside declared properties")
       const value = this.node(additional)
-      return { ts: `{ readonly [key: string]: ${value.ts} }`, schema: `Wire.record(${value.schema})` }
+      return { ts: `{ readonly [key: string]: ${value.ts} }`, schema: `Wire.record(${value.schema})`, refined: value.refined }
     }
     if (keys.length === 0) return { ts: "{ readonly [key: string]: unknown }", schema: "Wire.object({})" }
     const fields = keys.map((key) => {
@@ -247,12 +251,14 @@ class Emitter {
       const optional = !required.has(key)
       return {
         ts: `${docComment(Object.hasOwn(properties, key) ? properties[key] : undefined)}readonly ${propertyKey(key)}${optional ? "?" : ""}: ${value.ts}`,
-        schema: `${propertyKey(key)}: ${optional ? `Schema.optionalKey(${value.schema})` : value.schema}`
+        schema: `${propertyKey(key)}: ${optional ? `Schema.optionalKey(${value.schema})` : value.schema}`,
+        refined: value.refined
       }
     })
     return {
       ts: `{\n  ${fields.map((f) => indent(f.ts)).join("\n  ")}\n}`,
-      schema: `Wire.object({\n  ${fields.map((f) => indent(f.schema)).join(",\n  ")}\n})`
+      schema: `Wire.object({\n  ${fields.map((f) => indent(f.schema)).join(",\n  ")}\n})`,
+      refined: fields.some((f) => f.refined)
     }
   }
 }
@@ -405,7 +411,7 @@ const emitModuleUnsafe = (document: JsonSchemaDocument, options: EmitOptions): s
       ``,
       override ? `// Reviewed override: ${override.reason.replaceAll("\n", " ")}` : "",
       `${doc}export type ${name} = ${emitted.ts}`,
-      `export const ${name} = Wire.def<${name}>(${str(name)}, ${emitted.schema})`
+      `export const ${name} = Wire.${"refined" in emitted && emitted.refined ? "refinedDef" : "def"}<${name}>(${str(name)}, ${emitted.schema})`
     )
   }
   const methods = collectMethods(definitions)
