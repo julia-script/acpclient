@@ -136,8 +136,10 @@ for (const version of [1, 2] as const) {
   test(`v${version} released session handles cannot send new commands`, () => run(Effect.gen(function*() {
     const { agent, session } = yield* withSession(version)
     yield* session.release
+    yield* session.release
     expect(causeOf(yield* Effect.exit(session.submit([text("after release")])))).toContain("AcpConnectionClosed")
     expect(causeOf(yield* Effect.exit(session.cancel))).toContain("AcpConnectionClosed")
+    expect((yield* session.snapshot).sessionId).toBe("sess-1")
     const sent = yield* agent.received
     expect(sent.filter((message) => message.method === "session/prompt" || message.method === "session/cancel")).toHaveLength(0)
   })))
@@ -145,9 +147,12 @@ for (const version of [1, 2] as const) {
   test(`v${version} releasing a session settles its admitted submission`, () => run(Effect.gen(function*() {
     const { agent, session } = yield* withSession(version)
     const submission = yield* session.submit([text("held")])
+    const accepted = yield* Effect.exit(submission.accepted).pipe(Effect.forkChild)
     const outcome = yield* Effect.exit(submission.outcome).pipe(Effect.forkChild)
     yield* agent.awaitRequest("session/prompt")
     yield* session.release
+    const acceptedCause = causeOf(yield* Fiber.join(accepted).pipe(Effect.timeout("200 millis")))
+    expect(acceptedCause).toContain(version === 1 ? "AcpCapabilityUnsupported" : "AcpConnectionClosed")
     expect(causeOf(yield* Fiber.join(outcome).pipe(Effect.timeout("200 millis")))).toContain("AcpConnectionClosed")
   })))
 }
