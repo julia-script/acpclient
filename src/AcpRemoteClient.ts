@@ -208,7 +208,20 @@ export const make = (gateway: Client, options: Options) => Effect.gen(function*(
     })).pipe(Effect.onError(() => Scope.close(borrowed, Exit.void)))
     const shared = yield* RcMap.get(attachments, cacheKey).pipe(
       Scope.provide(borrowed), Effect.onError(() => Scope.close(borrowed, Exit.void)))
-    const handle: AcpSession = { ...shared, release: Scope.close(borrowed, Exit.void) }
+    const ensureBorrowed = Effect.suspend(() => borrowed.state._tag === "Closed"
+      ? Effect.fail(AcpGateway.failure("Closed")) : Effect.void)
+    const held = <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.flatMap(ensureBorrowed, () => effect)
+    const handle: AcpSession = {
+      ...shared,
+      release: Scope.close(borrowed, Exit.void),
+      submit: (prompt) => held(shared.submit(prompt)),
+      cancel: held(shared.cancel),
+      resolveInteraction: (interactionId, resolution) => held(shared.resolveInteraction(interactionId, resolution)),
+      setConfigOption: (configId, value) => held(shared.setConfigOption(configId, value)),
+      setMode: (modeId) => held(shared.setMode(modeId)),
+      close: held(shared.close),
+      delete: held(shared.delete)
+    }
     descriptors.set(handle, descriptor)
     yield* Scope.addFinalizer(borrowed, Effect.sync(() => { descriptors.delete(handle) }))
     return handle

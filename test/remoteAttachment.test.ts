@@ -54,6 +54,7 @@ test("concurrent callers share one attachment until both scopes close", () => ru
 
   yield* Scope.close(firstScope, Exit.void)
   expect(detached).toBe(1)
+  expect(code(yield* Effect.exit(first.cancel))).toBe("Closed")
   const observation = yield* Scope.provide(second.observe, secondScope)
   const next = yield* Stream.runHead(observation.changes).pipe(Effect.forkChild)
   yield* h.agent.update("sess-1", { sessionUpdate: "agent_message_chunk", messageId: "m", content: { type: "text", text: "alive" } })
@@ -78,6 +79,11 @@ test("explicit release drops only its caller reference", () => run(Effect.gen(fu
   const second = yield* Scope.provide(h.remote.attach(descriptor), secondScope)
   yield* first.release
   yield* first.release
+  expect(code(yield* Effect.exit(first.submit([{ type: "text", text: "released" }])))).toBe("Closed")
+  yield* second.cancel
+  const sent = yield* h.agent.received
+  expect(sent.filter((message) => message.method === "session/prompt")).toHaveLength(0)
+  expect(sent.filter((message) => message.method === "session/cancel")).toHaveLength(1)
   const observed = yield* Scope.provide(second.observe, secondScope)
   const next = yield* Stream.runHead(observed.changes).pipe(Effect.forkChild)
   yield* h.agent.update("sess-1", { sessionUpdate: "agent_message_chunk", messageId: "m", content: { type: "text", text: "alive" } })
