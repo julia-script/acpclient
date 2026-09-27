@@ -13,8 +13,13 @@ import type { JsonSchemaDocument, Manifest, ManifestInput } from "./inputs.ts"
 import { overrides as defaultOverrides, type Overrides } from "./overrides.ts"
 
 export class UnsupportedSchemaError extends Data.TaggedError("UnsupportedSchemaError")<{ readonly message: string }> {
-  constructor(readonly definition: string, readonly construct: string, detail?: string) {
+  readonly definition: string
+  readonly construct: string
+
+  constructor(definition: string, construct: string, detail?: string) {
     super({ message: `Unsupported JSON Schema construct "${construct}" in definition ${definition}${detail ? `: ${detail}` : ""}` })
+    this.definition = definition
+    this.construct = construct
   }
 }
 
@@ -102,7 +107,13 @@ const propertyKey = (k: string) => {
 const methodKey = (k: string) => k === "__proto__" ? propertyKey(k) : str(k)
 
 class Emitter {
-  constructor(readonly definitions: Readonly<Record<string, unknown>>, readonly definition: string) {}
+  readonly definitions: Readonly<Record<string, unknown>>
+  readonly definition: string
+
+  constructor(definitions: Readonly<Record<string, unknown>>, definition: string) {
+    this.definitions = definitions
+    this.definition = definition
+  }
 
   fail(construct: string, detail?: string): never {
     throw new UnsupportedSchemaError(this.definition, construct, detail)
