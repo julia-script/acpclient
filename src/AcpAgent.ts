@@ -361,6 +361,7 @@ interface SessionState {
   inserting?: boolean
   running: Fiber.Fiber<StopReason, HandlerError> | undefined
   cancelled: boolean
+  cancelling: boolean
 }
 
 /**
@@ -388,6 +389,7 @@ const build = <R>(options: Options<R>): AcpAgent<R> => {
   const enabled: ReadonlyArray<Version> = options.versions ?? [1]
 
   const serve = Effect.gen(function*() {
+      const serveScope = yield* Scope.Scope
       const store = yield* Effect.service(Store)
       // Routes must be `Effect<_, _, never>`, so capture the author's services
       // once here and provide them to every handler effect.
@@ -617,9 +619,9 @@ const build = <R>(options: Options<R>): AcpAgent<R> => {
             version: current.version,
             peer: current
           }
-          const state: SessionState = sessions.get(request.sessionId) ?? { scope: yield* Scope.make(), running: undefined, cancelled: false }
+          const state: SessionState = sessions.get(request.sessionId) ?? { scope: yield* Scope.fork(serveScope), running: undefined, cancelled: false, cancelling: false }
           sessions.set(request.sessionId, state)
-          if (state.running || state.inserting) return yield* new AcpRemoteError({ code: ErrorCode.InvalidRequest, message: "Session is busy" })
+          if (state.running || state.inserting || state.cancelling) return yield* new AcpRemoteError({ code: ErrorCode.InvalidRequest, message: "Session is busy" })
           state.inserting = true
           state.cancelled = false
           const inserted = yield* handler(Effect.suspend(() => options.prompt.insert({ ...context, prompt: request.prompt }))).pipe(Effect.onExit((exit) => Exit.isFailure(exit) ? Effect.sync(() => { state.inserting = false }) : Effect.void))
@@ -662,17 +664,23 @@ const build = <R>(options: Options<R>): AcpAgent<R> => {
           const { sessionId } = yield* decodeInput(SessionInput, params)
           const state = sessions.get(sessionId)
           const current = peer
-          if (state) state.cancelled = true
-          if (state?.running) {
-            // Interrupting drains the execution's finalizers (its final
-            // updates) before we report the cancelled stop reason.
-            yield* Fiber.interrupt(state.running)
-            state.running = undefined
+          if (state) {
+            state.cancelled = true
+            state.cancelling = true
           }
-          if (options.session.cancel && current) {
-            yield* options.session.cancel({ sessionId, version: current.version, peer: current }).pipe(Effect.ignore)
-          }
-          if (current) yield* emitIdle(sessionId, current.version, "cancelled")
+          yield* Effect.gen(function*() {
+            const running = state?.running
+            if (running) {
+              // Interrupting drains the execution's finalizers (its final
+              // updates) before we report the cancelled stop reason.
+              yield* Fiber.interrupt(running)
+              if (state.running === running) state.running = undefined
+            }
+            if (options.session.cancel && current) {
+              yield* options.session.cancel({ sessionId, version: current.version, peer: current }).pipe(Effect.ignore)
+            }
+            if (current && (!state || sessions.get(sessionId) === state)) yield* emitIdle(sessionId, current.version, "cancelled")
+          }).pipe(Effect.ensuring(Effect.sync(() => { if (state) state.cancelling = false })))
         })
 
       const routes: Array<AcpConnection.Route> = [

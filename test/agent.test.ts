@@ -12,6 +12,7 @@ import * as Clock from "effect/Clock"
 import * as DateTime from "effect/DateTime"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
 import * as Logger from "effect/Logger"
 import * as Scope from "effect/Scope"
@@ -430,6 +431,57 @@ describe("client interactions", () => {
 })
 
 describe("cancellation", () => {
+  test("does not admit a new prompt while cancellation is still finishing", () =>
+    run(Effect.gen(function*() {
+      const started = yield* Deferred.make<void>()
+      const cancelling = yield* Deferred.make<void>()
+      const finishCancellation = yield* Deferred.make<void>()
+      let nextMessage = 0
+      const agent = AcpAgent.makeUnsafe({
+        ...baseOptions(),
+        session: {
+          create: () => Effect.succeed({ sessionId: "s-1" }),
+          cancel: () => Deferred.succeed(cancelling, undefined).pipe(Effect.andThen(Deferred.await(finishCancellation)))
+        },
+        prompt: {
+          insert: () => Effect.sync(() => ({ messageId: `m-${++nextMessage}` })),
+          execute: () => Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never), Effect.as("end_turn"))
+        }
+      })
+      const peer = yield* connect(agent)
+      const responseFor = (id: number) => Effect.gen(function*() {
+        while (true) {
+          const frame = yield* peer.next
+          if (field(frame, "id") === id) return frame
+        }
+      })
+      yield* peer.send(initialize(2))
+      yield* responseFor(0)
+      yield* peer.send({ jsonrpc: "2.0", id: 1, method: "session/new", params: { cwd: "/tmp" } })
+      yield* responseFor(1)
+      const prompt = (id: number) => peer.send({
+        jsonrpc: "2.0", id, method: "session/prompt",
+        params: { sessionId: "s-1", prompt: [] }
+      })
+      yield* prompt(2)
+      yield* responseFor(2)
+      yield* Deferred.await(started)
+      yield* peer.send({ jsonrpc: "2.0", method: "session/cancel", params: { sessionId: "s-1" } })
+      yield* Deferred.await(cancelling)
+      yield* prompt(3)
+      const duringCancellation = yield* responseFor(3)
+      yield* Deferred.succeed(finishCancellation, undefined)
+      expect(field(duringCancellation, "error.message")).toBe("Session is busy")
+      let idle: unknown
+      while (idle === undefined) {
+        const frame = yield* peer.next
+        if (field(frame, "params.update.state") === "idle") idle = frame
+      }
+      yield* prompt(4)
+      const afterCancellation = yield* responseFor(4)
+      expect(field(afterCancellation, "result.messageId")).toBe("m-2")
+    })))
+
   test("cancelling a v2 session emits final updates before the cancelled idle state", () =>
     run(Effect.gen(function*() {
       const started = Deferred.makeUnsafe<void>()
@@ -472,6 +524,81 @@ describe("cancellation", () => {
       expect(seen.indexOf(partial)).toBeLessThan(seen.indexOf(idle))
     })))
 })
+
+test("serve shutdown closes a session registered after cleanup begins", () =>
+  run(Effect.gen(function*() {
+    const backing = yield* Store.InMemory
+    const lateLookup = yield* Deferred.make<void>()
+    const releaseLookup = yield* Deferred.make<void>()
+    const firstStarted = yield* Deferred.make<void>()
+    const firstClosing = yield* Deferred.make<void>()
+    const releaseFirst = yield* Deferred.make<void>()
+    const lateStarted = yield* Deferred.make<void>()
+    const lateStopped = yield* Deferred.make<void>()
+    const releaseLate = yield* Deferred.make<void>()
+    const store = Store.Store.of({
+      ...backing,
+      get: (sessionId) => sessionId === "late"
+        ? Deferred.succeed(lateLookup, undefined).pipe(
+          Effect.andThen(Deferred.await(releaseLookup)),
+          Effect.andThen(backing.get(sessionId))
+        )
+        : backing.get(sessionId)
+    })
+    let created = 0
+    const agent = AcpAgent.makeUnsafe({ ...baseOptions(), session: {
+      create: () => Effect.sync(() => ({ sessionId: ++created === 1 ? "first" : "late" }))
+    }, prompt: {
+      insert: ({ sessionId }) => Effect.succeed({ messageId: sessionId }),
+      execute: ({ sessionId }) => sessionId === "first"
+        ? Deferred.succeed(firstStarted, undefined).pipe(
+          Effect.andThen(Effect.never),
+          Effect.onInterrupt(() => Deferred.succeed(firstClosing, undefined).pipe(Effect.andThen(Deferred.await(releaseFirst)))),
+          Effect.as("end_turn")
+        )
+        : Deferred.succeed(lateStarted, undefined).pipe(
+          Effect.andThen(Deferred.await(releaseLate)),
+          Effect.onInterrupt(() => Deferred.succeed(lateStopped, undefined)),
+          Effect.as("end_turn")
+        )
+    } })
+    const [left, right] = yield* InMemory.makePair()
+    const serving = yield* Effect.forkScoped(agent.serve.pipe(
+      Effect.provideService(AcpTransport, right),
+      Effect.provideService(Store.Store, store),
+      Effect.ignore
+    ))
+    const peer = yield* driver(left)
+    const responseFor = (id: number) => Effect.gen(function*() {
+      while (true) {
+        const frame = yield* peer.next
+        if (field(frame, "id") === id) return frame
+      }
+    })
+    yield* peer.send(initialize(2))
+    yield* responseFor(0)
+    for (const [id, sessionId] of [[1, "first"], [2, "late"]] as const) {
+      yield* peer.send({ jsonrpc: "2.0", id, method: "session/new", params: { cwd: "/tmp" } })
+      expect(field(yield* responseFor(id), "result.sessionId")).toBe(sessionId)
+    }
+    const prompt = (id: number, sessionId: string) => peer.send({
+      jsonrpc: "2.0", id, method: "session/prompt", params: { sessionId, prompt: [] }
+    })
+    yield* prompt(3, "first")
+    yield* responseFor(3)
+    yield* Deferred.await(firstStarted)
+    yield* prompt(4, "late")
+    yield* Deferred.await(lateLookup)
+    const shuttingDown = yield* Effect.forkChild(Fiber.interrupt(serving))
+    yield* Deferred.await(firstClosing)
+    yield* Deferred.succeed(releaseLookup, undefined)
+    yield* Deferred.await(lateStarted)
+    yield* Deferred.succeed(releaseFirst, undefined)
+    yield* Fiber.join(shuttingDown)
+    const stopped = yield* Deferred.isDone(lateStopped)
+    yield* Deferred.succeed(releaseLate, undefined)
+    expect(stopped).toBe(true)
+  })))
 
 describe("store-backed replay", () => {
   test("records each message's first real time across chunks and replacements, then replays in that order", () =>
