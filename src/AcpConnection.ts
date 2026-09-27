@@ -231,7 +231,7 @@ export const make = Effect.fnUntraced(function*(options: Options = {}) {
   )
 
   const terminate = (reason: AcpConnectionClosed) =>
-    Effect.suspend(() => {
+    Effect.uninterruptibleMask((restore) => Effect.suspend(() => {
       if (terminated) return Effect.void
       terminated = reason
       const waiting = [...pending.values()]
@@ -239,9 +239,9 @@ export const make = Effect.fnUntraced(function*(options: Options = {}) {
       return Effect.forEach(waiting, (deferred) => Deferred.fail(deferred, reason), { discard: true }).pipe(
         Effect.andThen(Deferred.succeed(done, reason)),
         Effect.andThen(Queue.shutdown(notifications)),
-        Effect.andThen(FiberSet.clear(fibers))
+        Effect.andThen(restore(FiberSet.clear(fibers)))
       )
-    })
+    }))
   // Used from fibers inside `fibers`, which must not interrupt themselves.
   const terminateLater = (reason: AcpConnectionClosed) => Effect.asVoid(Effect.forkIn(terminate(reason), scope))
 
