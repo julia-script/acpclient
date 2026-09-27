@@ -13,8 +13,8 @@ import * as Wire from "./internal/wire.ts"
  * A JSON-RPC request identifier. Distinct from session, message, and
  * application identifiers.
  */
-export type RequestId = string | number | null
-export const RequestId: Schema.Codec<RequestId> = Schema.Union([Schema.String, Wire.integer, Schema.Null])
+export const RequestId = Schema.Union([Schema.String, Wire.integer, Schema.Null])
+export type RequestId = typeof RequestId.Type
 
 /** Standard JSON-RPC and ACP error codes. */
 export const ErrorCode = {
@@ -39,32 +39,32 @@ export const ErrorObject: Schema.Codec<ErrorObject> = Wire.object({
 }).annotate({ identifier: "ErrorObject" })
 
 /** A request method: params are sent, a result (or error) comes back. */
-export interface RequestMethod<M extends string = string, P = unknown, R = unknown> {
+export interface RequestMethod<M extends string = string, P = unknown, R = unknown, PE = unknown, RE = unknown> {
   readonly _tag: "Request"
   readonly method: M
-  readonly params: Schema.Codec<P>
-  readonly result: Schema.Codec<R>
+  readonly params: Schema.Codec<P, PE>
+  readonly result: Schema.Codec<R, RE>
 }
 
 /** A notification method: params are sent and never answered. */
-export interface NotificationMethod<M extends string = string, P = unknown> {
+export interface NotificationMethod<M extends string = string, P = unknown, PE = unknown> {
   readonly _tag: "Notification"
   readonly method: M
-  readonly params: Schema.Codec<P>
+  readonly params: Schema.Codec<P, PE>
 }
 
 export type Method = RequestMethod | NotificationMethod
 
-export const request = <const M extends string, P, R>(
+export const request = <const M extends string, P, R, PE, RE>(
   method: M,
-  params: Schema.Codec<P>,
-  result: Schema.Codec<R>
-): RequestMethod<M, P, R> => ({ _tag: "Request", method, params, result })
+  params: Schema.Codec<P, PE>,
+  result: Schema.Codec<R, RE>
+): RequestMethod<M, P, R, PE, RE> => ({ _tag: "Request", method, params, result })
 
-export const notification = <const M extends string, P>(
+export const notification = <const M extends string, P, PE>(
   method: M,
-  params: Schema.Codec<P>
-): NotificationMethod<M, P> => ({ _tag: "Notification", method, params })
+  params: Schema.Codec<P, PE>
+): NotificationMethod<M, P, PE> => ({ _tag: "Notification", method, params })
 
 /** Params type of a declared method. */
 export type Params<D extends Method> = D["params"]["Type"]

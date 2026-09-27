@@ -3,6 +3,7 @@
  *
  */
 import * as Schema from "effect/Schema"
+import { RequestId } from "./AcpSchema.ts"
 
 /** A transport could not open, read, write, or frame a message. */
 export class AcpTransportError extends Schema.TaggedError<AcpTransportError>()("AcpTransportError", {
@@ -42,7 +43,7 @@ export class AcpCapacityError extends Schema.TaggedError<AcpCapacityError>()("Ac
  */
 export class AcpTimeoutError extends Schema.TaggedError<AcpTimeoutError>()("AcpTimeoutError", {
   method: Schema.String,
-  requestId: Schema.Union([Schema.String, Schema.Finite, Schema.Null])
+  requestId: RequestId
 }) {}
 
 /** Initialization selected a protocol version outside the enabled set. */
