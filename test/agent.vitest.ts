@@ -7,14 +7,17 @@ import * as Json from "../src/internal/json.ts"
  * socket, not that it agrees with itself.
  */
 import { describe, expect, it } from "@effect/vitest"
+import * as Cause from "effect/Cause"
 import * as Context from "effect/Context"
 import * as Clock from "effect/Clock"
 import * as DateTime from "effect/DateTime"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
 import * as Logger from "effect/Logger"
+import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
 import * as Sink from "effect/Sink"
 import * as Stdio from "effect/Stdio"
@@ -27,6 +30,15 @@ import { driver } from "./support/driver.ts"
 
 const run = <A, E>(effect: Effect.Effect<A, E, Scope.Scope | Store.Store>) =>
   Effect.scoped(effect).pipe(Effect.provide(Store.layer))
+
+const agentFailure = (exit: Exit.Exit<unknown, unknown>) => {
+  if (Exit.isSuccess(exit)) throw new Error("Expected an agent failure")
+  const found = Cause.findErrorOption(exit.cause)
+  if (Option.isNone(found) || !(found.value instanceof AcpAgent.AcpAgentError)) {
+    throw new Error(Cause.pretty(exit.cause))
+  }
+  return found.value
+}
 
 /** Minimal handlers any test can start from. */
 const baseOptions = (): AcpAgent.Options => ({
@@ -424,7 +436,9 @@ describe("client interactions", () => {
         params: { sessionId: "s-1", prompt: [] }
       })
       const outcome = yield* Deferred.await(attempted)
-      expect(field(outcome, "_tag")).toBe("Failure")
+      expect(agentFailure(outcome)).toMatchObject({
+        _tag: "AcpAgentError", code: -32600, message: "Client does not support url elicitation"
+      })
       // Nothing about elicitation reached the wire.
       expect(peer.received.some((frame) => frame.includes("elicitation/create"))).toBe(false)
     })))
@@ -738,7 +752,9 @@ describe("store-backed replay", () => {
       yield* peer.next
       yield* peer.send({ jsonrpc: "2.0", id: 2, method: "session/prompt", params: { sessionId: "s-1", prompt: [] } })
       const exit = yield* Deferred.await(outcome)
-      expect(field(exit, "_tag")).toBe("Failure")
+      expect(agentFailure(exit)).toMatchObject({
+        _tag: "AcpAgentError", message: "Full message replacement requires protocol v2"
+      })
     })))
 
   it.effect("session/list is advertised and answered only when enabled", () =>

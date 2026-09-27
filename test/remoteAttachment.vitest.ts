@@ -4,6 +4,8 @@ import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
+import * as Option from "effect/Option"
+import * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as AcpGateway from "../src/AcpGateway.ts"
@@ -14,9 +16,14 @@ import { apiFor, hostedHarness } from "./support/host.ts"
 const run = <A, E>(effect: Effect.Effect<A, E, Scope.Scope>) =>
   Effect.scoped(effect).pipe(Effect.timeout("3 seconds"))
 
-const code = (exit: Exit.Exit<unknown, unknown>) => Exit.isSuccess(exit)
-  ? "success"
-  : (Cause.squash(exit.cause) as AcpGateway.GatewayError).code
+const code = (exit: Exit.Exit<unknown, unknown>) => {
+  if (Exit.isSuccess(exit)) return "success"
+  const found = Cause.findErrorOption(exit.cause)
+  if (Option.isNone(found) || !Schema.is(AcpGateway.GatewayError)(found.value)) {
+    throw new Error(Cause.pretty(exit.cause))
+  }
+  return found.value.code
+}
 
 it.live("concurrent callers share one attachment until both scopes close", () => run(Effect.gen(function*() {
   let attached = 0

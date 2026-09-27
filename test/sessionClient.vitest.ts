@@ -14,7 +14,7 @@ import * as V1 from "../src/protocol/v1/Schema.ts"
 import * as V2 from "../src/protocol/v2/Schema.ts"
 import { type ScriptedAgent, scriptedAgent } from "./support/sessionAgent.ts"
 
-import { harness, text, settle, until, causeOf, failureOf, completePrompt, sessionContract, type Harness } from "./support/sessionContract.ts"
+import { awaitSnapshot, harness, text, failureOf, completePrompt, sessionContract, type Harness } from "./support/sessionContract.ts"
 
 const run = <A, E>(effect: Effect.Effect<A, E, Scope.Scope>) => Effect.scoped(effect)
 const hasText = (session: { readonly messages: ReadonlyArray<{ readonly content: ReadonlyArray<{ readonly type: string }> }> }, value: string) =>
@@ -247,7 +247,8 @@ describe("v2 acceptance and completion are separate", () => {
 
       // The user-message update arrives before the prompt response.
       yield* agent.update("sess-1", { sessionUpdate: "user_message", messageId: "m-1", content: [text("hi")] })
-      yield* settle
+      yield* awaitSnapshot(session, (snapshot) =>
+        snapshot.messages.some((message) => message.id === "m-1"))
       yield* agent.respond("session/prompt", { messageId: "m-1" })
 
       expect(yield* submission.accepted).toBe("m-1")
@@ -303,9 +304,7 @@ describe("v1 compatibility", () => {
       yield* agent.awaitRequest("session/prompt")
       // The agent echoes identical text with no message id.
       yield* agent.update("sess-1", { sessionUpdate: "user_message_chunk", content: text("same text") })
-      yield* settle
-
-      const snapshot = yield* session.snapshot
+      const snapshot = yield* awaitSnapshot(session, (snapshot) => snapshot.messages.length === 1)
       expect(snapshot.messages[0]!.provenance).toEqual({ _tag: "local" })
       // Identical content must not be treated as the submission's message.
       expect(snapshot.submissions[submission.id]!.agentMessageId).toBeNull()
@@ -343,8 +342,7 @@ describe("v1 compatibility", () => {
         method: "fs/read_text_file",
         params: { sessionId: "sess-1", path: "/work/a.ts" }
       })
-      yield* settle
-      const reply = (yield* agent.received).find((message) => message.id === "fs-1")
+      const reply = yield* agent.awaitReply("fs-1")
       expect(reply).toMatchObject({ result: { content: "hello from disk" } })
     })))
 
@@ -376,7 +374,6 @@ describe("v1 compatibility", () => {
       yield* agent.awaitRequest("session/load")
       // Replay arrives before the load response and must still be retained.
       yield* agent.update("sess-1", { sessionUpdate: "agent_message_chunk", content: text("replayed") })
-      yield* settle
       yield* agent.respond("session/load", { modes: { currentModeId: "code", availableModes: [] } })
 
       const session = yield* Fiber.join(resuming)
@@ -414,7 +411,7 @@ describe("interaction deadlines and withdrawal", () => {
     run(Effect.gen(function*() {
       const { agent, session } = yield* withSession(2, { connect: { interactionTimeout: "50 millis" } })
       yield* agent.send(permission(2))
-      yield* until(Effect.map(session.snapshot, (snapshot) => Object.keys(snapshot.interactions).length === 1))
+      yield* awaitSnapshot(session, (snapshot) => Object.keys(snapshot.interactions).length === 1)
 
       const interactionId = Object.keys((yield* session.snapshot).interactions)[0]!
       // Nobody answers; the deadline elapses.
@@ -439,18 +436,16 @@ describe("interaction deadlines and withdrawal", () => {
     run(Effect.gen(function*() {
       const { agent, session } = yield* withSession(2)
       yield* agent.send(permission(2))
-      yield* until(Effect.map(session.snapshot, (snapshot) => Object.keys(snapshot.interactions).length === 1))
+      yield* awaitSnapshot(session, (snapshot) => Object.keys(snapshot.interactions).length === 1)
       const interactionId = Object.keys((yield* session.snapshot).interactions)[0]!
 
       // The agent withdraws its own request.
       yield* agent.send({ jsonrpc: "2.0", method: "$/cancel_request", params: { requestId: "perm-1" } })
-      yield* until(
-        Effect.map(session.snapshot, (snapshot) => snapshot.interactions[interactionId]!.status === "cancelled")
-      )
+      yield* awaitSnapshot(session, (snapshot) => snapshot.interactions[interactionId]?.status === "cancelled")
 
       // Unrelated traffic still flows afterwards.
       yield* agent.update("sess-1", { sessionUpdate: "agent_message_chunk", messageId: "m-1", content: text("after") })
-      yield* until(Effect.map(session.snapshot, (snapshot) => snapshot.messages.length === 1))
+      yield* awaitSnapshot(session, (snapshot) => snapshot.messages.length === 1)
     })))
 
   it.effect("an elicitation is exposed as a pending interaction and resolved once", () =>
@@ -462,14 +457,13 @@ describe("interaction deadlines and withdrawal", () => {
         method: "elicitation/create",
         params: { sessionId: "sess-1", message: "Which branch?", mode: "form", requestedSchema: { type: "object", properties: { branch: { type: "string" } } } }
       })
-      yield* until(Effect.map(session.snapshot, (snapshot) => Object.keys(snapshot.interactions).length === 1))
+      yield* awaitSnapshot(session, (snapshot) => Object.keys(snapshot.interactions).length === 1)
 
       const interaction = Object.values((yield* session.snapshot).interactions)[0]!
       expect(interaction.kind).toBe("elicitation")
 
       yield* session.resolveInteraction(interaction.interactionId, { _tag: "accept", content: { branch: "main" } })
-      yield* until(Effect.map(agent.received, (sent) => sent.some((message) => message.id === "elicit-1")))
-      expect((yield* agent.received).find((message) => message.id === "elicit-1")?.result).toEqual({
+      expect((yield* agent.awaitReply("elicit-1")).result).toEqual({
         action: "accept",
         content: { branch: "main" }
       })
@@ -503,7 +497,6 @@ describe("provisional routing bounds", () => {
           content: text(String(index))
         })
       }
-      yield* settle
       yield* agent.releaseNewSession({ sessionId: "sess-1" })
 
       // Silently losing required deltas is exactly what the bound forbids.
@@ -553,7 +546,9 @@ describe("provisional routing bounds", () => {
           yield* agent.update("sess-1", { sessionUpdate: "agent_message_chunk", ...(version === 2 ? { messageId: "history" } : {}), content: text("history") })
           yield* agent.update("sess-1", { sessionUpdate: "agent_message_chunk", ...(version === 2 ? { messageId: "fresh" } : {}), content: text("fresh") })
           yield* agent.respondError(method, -32603, "replay failed")
-          expect(causeOf(yield* Fiber.await(resuming))).toContain("replay failed")
+          expect(failureOf(yield* Fiber.await(resuming))).toMatchObject({
+            _tag: "AcpRemoteError", code: -32603, message: "replay failed"
+          })
           const content = (yield* session.snapshot).messages.flatMap((message) => message.content)
           expect(content.filter((part) => "text" in part && part.text === "history")).toHaveLength(1)
           expect(content.filter((part) => "text" in part && part.text === "fresh")).toHaveLength(0)
@@ -572,7 +567,9 @@ describe("provisional routing bounds", () => {
         yield* expectLiveRoute(agent, session, version, `during-resume-v${version}`)
         yield* agent.update("sess-1", { sessionUpdate: "agent_message_chunk", ...(version === 2 ? { messageId: "during-failure" } : {}), content: text("during-failure") })
         yield* agent.respondError("session/resume", -32603, "resume failed")
-        expect(causeOf(yield* Fiber.await(resuming))).toContain("resume failed")
+        expect(failureOf(yield* Fiber.await(resuming))).toMatchObject({
+          _tag: "AcpRemoteError", code: -32603, message: "resume failed"
+        })
         yield* expectLiveRoute(agent, session, version, `after-failure-v${version}`)
         const snapshot = yield* session.snapshot
         expect(snapshot.messages.flatMap((message) => message.content).filter((part) => "text" in part && part.text === "during-failure")).toHaveLength(1)
@@ -638,9 +635,11 @@ describe("provisional routing bounds", () => {
           yield* agent.send(response)
           yield* agent.send(update)
         }
-        expect(causeOf(yield* Fiber.await(resuming))).toContain("replay failed")
+        expect(failureOf(yield* Fiber.await(resuming))).toMatchObject({
+          _tag: "AcpRemoteError", code: -32603, message: "replay failed"
+        })
         yield* agent.update("sess-1", { sessionUpdate: "agent_message_chunk", messageId: "sentinel", content: text("sentinel") })
-        yield* until(Effect.map(session.snapshot, (snapshot) => hasText(snapshot, "sentinel")))
+        yield* awaitSnapshot(session, (snapshot) => hasText(snapshot, "sentinel"))
         const content = (yield* session.snapshot).messages.flatMap((message) => message.content)
         expect(content.filter((part) => "text" in part && part.text === "history")).toHaveLength(1)
         expect(content.filter((part) => "text" in part && part.text === "after-response")).toHaveLength(1)
@@ -665,7 +664,9 @@ describe("provisional routing bounds", () => {
         yield* agent.update("sess-1", { sessionUpdate: "agent_message_chunk", messageId: value, content: text(value) })
       }
       yield* agent.respondError("session/resume", -32603, "replay failed")
-      expect(causeOf(yield* Fiber.await(resuming))).toContain("replay failed")
+      expect(failureOf(yield* Fiber.await(resuming))).toMatchObject({
+        _tag: "AcpRemoteError", code: -32603, message: "replay failed"
+      })
       const content = (yield* session.snapshot).messages.flatMap((message) => message.content)
       for (const value of ["A", "B"]) {
         expect(content.filter((part) => "text" in part && part.text === value)).toHaveLength(1)
@@ -703,7 +704,9 @@ describe("provisional routing bounds", () => {
       yield* session.release
       expect(yield* agent.awaitReply("released-inflight-permission")).toMatchObject({ result: { outcome: { outcome: "cancelled" } } })
       yield* agent.respondError("session/resume", -32603, "resume failed")
-      expect(causeOf(yield* Fiber.await(resuming))).toContain("resume failed")
+      expect(failureOf(yield* Fiber.await(resuming))).toMatchObject({
+        _tag: "AcpRemoteError", code: -32603, message: "resume failed"
+      })
       yield* agent.send({
         jsonrpc: "2.0", id: "released-permission", method: "session/request_permission",
         params: { sessionId: "sess-1", title: "Edit file", options: [{ optionId: "allow", name: "Allow", kind: "allow_once" }] }
@@ -811,7 +814,7 @@ it.effect("absent v2 session surface fails before sending session/new", () => ru
 it.effect("invalid permission selection leaves the pending request available for a valid answer", () => run(Effect.gen(function*() {
   const { agent, session } = yield* withSession(2)
   yield* agent.send({ jsonrpc: "2.0", id: "p", method: "session/request_permission", params: { sessionId: "sess-1", title: "Permission", options: [{ optionId: "allow", name: "Allow", kind: "allow_once" }] } })
-  yield* until(Effect.map(session.snapshot, (s) => Object.keys(s.interactions).length === 1))
+  yield* awaitSnapshot(session, (snapshot) => Object.keys(snapshot.interactions).length === 1)
   const id = Object.keys((yield* session.snapshot).interactions)[0]!
   expect(failureOf(yield* Effect.exit(session.resolveInteraction(id, { _tag: "selected", optionId: "invented" })))).toMatchObject({ _tag: "AcpProtocolError" })
   expect((yield* session.snapshot).interactions[id]!.status).toBe("pending")
@@ -856,12 +859,13 @@ it.effect("second v1 turn resets idle state and cancellation waits for its promp
   const second = yield* session.submit([text("second")])
   yield* agent.awaitRequest("session/prompt")
   expect((yield* session.snapshot).foreground).toEqual({ state: "running", provenance: "inferred" })
+  const cancelArrived = yield* Effect.forkChild(agent.awaitRequest("session/cancel"))
   const cancelling = yield* Effect.forkChild(session.cancel)
-  yield* settle
+  yield* Fiber.join(cancelArrived)
   yield* agent.update(session.sessionId, {
     sessionUpdate: "agent_message_chunk", content: text("Still stopping")
   })
-  yield* settle
+  yield* awaitSnapshot(session, (snapshot) => hasText(snapshot, "Still stopping"))
   expect(cancelling.pollUnsafe()).toBeUndefined()
   expect((yield* session.snapshot).activeSubmissionId).toBe(second.id)
 

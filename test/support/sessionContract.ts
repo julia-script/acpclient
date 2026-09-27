@@ -8,7 +8,7 @@ import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
-import type { AcpAgentConnection, ConnectOptions } from "../../src/AcpClient.ts"
+import type { AcpAgentConnection, AcpSession, ConnectOptions } from "../../src/AcpClient.ts"
 import { type ConnectError, AcpClient } from "../../src/AcpClient.ts"
 import * as AcpLocalClient from "../../src/AcpLocalClient.ts"
 import { type ScriptedAgent, scriptedAgent } from "./sessionAgent.ts"
@@ -40,22 +40,17 @@ export const harness = (
 
 
 export const text = (value: string) => ({ type: "text" as const, text: value })
-/** Lets forked fibers and the transport make progress. */
-export const settle = Effect.repeat(Effect.yieldNow, { times: 40 })
+type SessionSnapshot = Effect.Success<AcpSession["snapshot"]>
 
-/** Waits until `condition` holds, so assertions do not race delivery. */
-export const until = (condition: Effect.Effect<boolean>) =>
-  Effect.gen(function*() {
-    for (let attempt = 0; attempt < 200; attempt++) {
-      if (yield* condition) return
-      yield* Effect.yieldNow
-    }
-    throw new Error("Condition never held")
-  })
-
-/** The rendered cause of a failed exit, for message assertions. */
-export const causeOf = (exit: Exit.Exit<unknown, unknown>) =>
-  Exit.isFailure(exit) ? Cause.pretty(exit.cause) : "<succeeded>"
+/** Observes the current state and then waits for the first matching change. */
+export const awaitSnapshot = (session: AcpSession, predicate: (snapshot: SessionSnapshot) => boolean) =>
+  Effect.scoped(Effect.gen(function*() {
+    const observed = yield* session.observe
+    if (predicate(observed.snapshot)) return observed.snapshot
+    const event = yield* Stream.runHead(Stream.filter(observed.changes, (change) => predicate(change.snapshot)))
+    if (Option.isNone(event)) throw new Error("Session observation ended before the expected change")
+    return event.value.snapshot
+  }))
 
 export const failureOf = (exit: Exit.Exit<unknown, unknown>): unknown => {
   if (Exit.isSuccess(exit)) throw new Error("Expected a failed exit")
@@ -74,10 +69,8 @@ export const completePrompt = (agent: ScriptedAgent, version: 1 | 2, sessionId =
     yield* agent.respond("session/prompt", promptResult(version))
     if (version === 2) {
       // v2 ends foreground work with an idle state update, not the response.
-      yield* settle
       yield* agent.update(sessionId, { sessionUpdate: "state_update", state: "idle", stopReason: "end_turn" })
     }
-    yield* settle
   })
 
 
@@ -134,8 +127,8 @@ export const sessionContract = (
           ...(version === 2 ? { messageId: "m-1" } : {}),
           content: text("two")
         })
-        yield* settle
-        const snapshot = yield* session.snapshot
+        const snapshot = yield* awaitSnapshot(session, (snapshot) =>
+          snapshot.messages.length === 1 && snapshot.messages[0]!.content.length === 2)
         expect(snapshot.messages).toHaveLength(1)
         expect(snapshot.messages[0]!.content).toEqual([text("one"), text("two")])
       })))
@@ -158,7 +151,6 @@ export const sessionContract = (
           ...(version === 2 ? { messageId: "early" } : {}),
           content: text("early")
         })
-        yield* settle
         yield* agent.releaseNewSession({ sessionId: "sess-1" })
 
         const session = yield* Fiber.join(opening)
@@ -189,7 +181,7 @@ export const sessionContract = (
           Effect.exit(session.submit([text("one")])),
           Effect.exit(session.submit([text("two")]))
         ], { concurrency: 2 })
-        yield* settle
+        yield* agent.awaitRequest("session/prompt")
 
         const admitted = [first, second].filter(Exit.isSuccess)
         const rejected = [first, second].filter(Exit.isFailure)
@@ -219,9 +211,8 @@ export const sessionContract = (
         const submission = yield* session.submit([text("boom")])
         yield* agent.awaitRequest("session/prompt")
         yield* agent.respondError("session/prompt", -32603, "Internal error")
-        yield* settle
-
-        const snapshot = yield* session.snapshot
+        const snapshot = yield* awaitSnapshot(session, (snapshot) =>
+          snapshot.submissions[submission.id]?.status._tag === "failed")
         expect(snapshot.submissions[submission.id]!.status).toMatchObject({
           _tag: "failed",
           failure: { _tag: "remote", code: -32603 }
@@ -247,9 +238,8 @@ export const sessionContract = (
             options: [{ optionId: "allow", name: "Allow", kind: "allow_once" }]
           }
         })
-        yield* settle
-
-        const pending = Object.values((yield* session.snapshot).interactions)
+        const pending = Object.values((yield* awaitSnapshot(session, (snapshot) =>
+          Object.values(snapshot.interactions).some((interaction) => interaction.status === "pending"))).interactions)
         expect(pending).toHaveLength(1)
         const interactionId = pending[0]!.interactionId
 
@@ -257,7 +247,7 @@ export const sessionContract = (
           Effect.exit(session.resolveInteraction(interactionId, { _tag: "selected", optionId: "allow" })),
           Effect.exit(session.resolveInteraction(interactionId, { _tag: "selected", optionId: "allow" }))
         ], { concurrency: 2 })
-        yield* settle
+        const reply = yield* agent.awaitReply("perm-1")
 
         expect([a, b].filter(Exit.isSuccess)).toHaveLength(1)
         expect(failureOf([a, b].find(Exit.isFailure)!)).toMatchObject({ _tag: "AcpInteractionAlreadyResolved" })
@@ -265,7 +255,7 @@ export const sessionContract = (
         // Exactly one response went on the wire.
         const sent = yield* agent.received
         expect(sent.filter((message) => message.id === "perm-1")).toHaveLength(1)
-        expect(sent.find((message) => message.id === "perm-1")!.result).toEqual({
+        expect(reply.result).toEqual({
           outcome: { outcome: "selected", optionId: "allow" }
         })
         expect((yield* session.snapshot).interactions[interactionId]!.status).toBe("resolved")
@@ -288,7 +278,8 @@ export const sessionContract = (
             options: [{ optionId: "allow", name: "Allow", kind: "allow_once" }]
           }
         })
-        yield* settle
+        yield* awaitSnapshot(session, (snapshot) =>
+          Object.values(snapshot.interactions).some((interaction) => interaction.status === "pending"))
 
         // Nobody has answered the permission request yet.
         const before = yield* agent.received
@@ -300,8 +291,7 @@ export const sessionContract = (
           ...(version === 2 ? { messageId: "m-9" } : {}),
           content: text("still working")
         })
-        yield* settle
-        expect((yield* session.snapshot).messages).toHaveLength(1)
+        expect((yield* awaitSnapshot(session, (snapshot) => snapshot.messages.length === 1)).messages).toHaveLength(1)
         expect(Object.values((yield* session.snapshot).interactions)[0]!.status).toBe("pending")
       })))
 
@@ -315,21 +305,18 @@ export const sessionContract = (
         const observerScope = yield* Scope.make()
         yield* Scope.provide(session.observe, observerScope)
         yield* Scope.close(observerScope, Exit.void)
-        yield* settle
-
-        // Nothing was sent on the observer's behalf.
-        const sent = yield* agent.received
-        for (const method of ["session/cancel", "session/close", "session/delete"]) {
-          expect(sent.filter((message) => message.method === method)).toHaveLength(0)
-        }
         // The runtime keeps applying updates after the observer is gone.
         yield* agent.update("sess-1", {
           sessionUpdate: "agent_message_chunk",
           ...(version === 2 ? { messageId: "m-1" } : {}),
           content: text("after")
         })
-        yield* settle
-        expect((yield* session.snapshot).messages).toHaveLength(1)
+        expect((yield* awaitSnapshot(session, (snapshot) => snapshot.messages.length === 1)).messages).toHaveLength(1)
+        // Processing advanced after unsubscribe without sending lifecycle traffic.
+        const sent = yield* agent.received
+        for (const method of ["session/cancel", "session/close", "session/delete"]) {
+          expect(sent.filter((message) => message.method === method)).toHaveLength(0)
+        }
       })))
 
     check("observe delivers a snapshot and the changes after it with no gap", () =>
@@ -340,7 +327,7 @@ export const sessionContract = (
           ...(version === 2 ? { messageId: "m-1" } : {}),
           content: text("before")
         })
-        yield* settle
+        yield* awaitSnapshot(session, (snapshot) => snapshot.messages.length === 1)
 
         const observed = yield* session.observe
         expect(observed.snapshot.messages).toHaveLength(1)
@@ -374,7 +361,7 @@ export const sessionContract = (
         }
         // Wait for the reducer to catch up rather than assuming a fixed
         // number of yields is enough.
-        yield* until(Effect.map(session.snapshot, (snapshot) => snapshot.seq >= 8))
+        yield* awaitSnapshot(session, (snapshot) => snapshot.seq >= 8)
 
         const collected = yield* Effect.exit(Stream.runCollect(observed.changes))
         // Falling behind surfaces as an explicit typed failure, not silence.
@@ -396,15 +383,15 @@ export const sessionContract = (
         yield* session.submit([text("long")])
         yield* agent.awaitRequest("session/prompt")
 
+        const cancelArrived = yield* Effect.forkChild(agent.awaitRequest("session/cancel"))
         const cancelling = yield* Effect.forkChild(session.cancel)
-        yield* settle
+        yield* Fiber.join(cancelArrived)
         const sent = yield* agent.received
         expect(sent.filter((message) => message.method === "session/cancel")).toHaveLength(1)
 
         // A late tool update still lands, and cancel is not yet confirmed.
         yield* agent.update("sess-1", { sessionUpdate: "tool_call_update", toolCallId: "t-1", status: "completed" })
-        yield* settle
-        expect((yield* session.snapshot).toolCalls["t-1"]!.status).toBe("completed")
+        expect((yield* awaitSnapshot(session, (snapshot) => snapshot.toolCalls["t-1"]?.status === "completed")).toolCalls["t-1"]!.status).toBe("completed")
         expect(cancelling.pollUnsafe()).toBeUndefined()
 
         yield* completePrompt(agent, version)
