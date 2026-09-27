@@ -85,11 +85,11 @@ export const fromSocket = <E, R>(
     const closeWith = (code: number, reason: string) =>
       writer.write(new Socket.CloseEvent(code, reason)).pipe(Effect.ignore)
 
-    yield* Scope.addFinalizer(socketScope, Effect.sync(() => {
-      closed = true
-    }))
-
     const frames = yield* Queue.bounded<string, AcpTransportError | Cause.Done>(options.buffer ?? 64)
+    yield* Scope.addFinalizer(socketScope, Effect.suspend(() => {
+      closed = true
+      return Queue.fail(frames, closedError)
+    }))
 
     const pump = Effect.gen(function*() {
       while (true) {

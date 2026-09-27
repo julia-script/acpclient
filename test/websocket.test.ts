@@ -176,6 +176,21 @@ describe("WebSocket profile", () => {
       expect(Exit.isFailure(exit) && (yield* Json.encode(exit.cause))).toContain("Closed")
       expect(ws.sent).toEqual([`{"jsonrpc":"2.0","id":1}`])
     }))))
+
+  test("scope release settles an incoming consumer outside the transport scope", () =>
+    Effect.runPromise(Effect.scoped(Effect.gen(function*() {
+      const ws = scriptable()
+      const owner = yield* Scope.fork(yield* Scope.Scope)
+      const transport = yield* Scope.provide(WebSocket.fromSocket(socketFrom(ws)), owner)
+      const consumer = yield* Effect.forkDetach(collect(transport.incoming))
+
+      yield* Scope.close(owner, Exit.void)
+      const exit = yield* Fiber.await(consumer).pipe(
+        Effect.timeout("1 second"),
+        Effect.ensuring(Fiber.interrupt(consumer))
+      )
+      expect(Exit.isFailure(exit) && (yield* Json.encode(exit.cause))).toContain("Closed")
+    }))))
 })
 
 test("opening deadline closes a socket that never opens", () => Effect.runPromise(Effect.scoped(Effect.gen(function*() {
