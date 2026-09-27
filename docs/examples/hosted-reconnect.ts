@@ -22,4 +22,6 @@ const program = Effect.gen(function*() {
   }))
 })
 
-BunRuntime.runMain(program.pipe(Effect.provide(Socket.layerWebSocketConstructorGlobal)))
+if (import.meta.main) {
+  BunRuntime.runMain(program.pipe(Effect.provide(Socket.layerWebSocketConstructorGlobal)))
+}

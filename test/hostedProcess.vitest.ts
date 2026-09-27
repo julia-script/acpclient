@@ -1,9 +1,7 @@
 import * as AcpConnector from "../src/AcpConnector.ts"
-import * as Json from "../src/internal/json.ts"
-import { expect, test } from "bun:test"
+import { expect, it } from "@effect/vitest"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as Effect from "effect/Effect"
-import * as Exit from "effect/Exit"
 import * as Layer from "effect/Layer"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { AcpClient } from "../src/AcpClient.ts"
@@ -12,9 +10,11 @@ import * as GC from "../src/AcpGatewayClient.ts"
 import * as Local from "../src/AcpLocalClient.ts"
 import * as Remote from "../src/AcpRemoteClient.ts"
 import * as Stdio from "../src/transport/Stdio.ts"
+import { failure } from "./support/failure.ts"
 import { apiFor, policy } from "./support/host.ts"
 const harness = Effect.gen(function*() {
-  const host = yield* Host.make({ policy: { ...policy, retentionMs: 30, shutdownMs: 20 }, authorize: () => Effect.void,
+  // Real subprocess scheduling needs room for release to reach the host before retention starts.
+  const host = yield* Host.make({ policy: { ...policy, retentionMs: 500, shutdownMs: 100 }, authorize: () => Effect.void,
     open: (_identity, _workspace, _profile, _options, enforced) => Effect.gen(function*() {
       const client = yield* AcpClient
       return yield* client.connect({ versions: [2], params: { info: { name: "test", version: "1" } }, ...enforced })
@@ -24,20 +24,19 @@ const harness = Effect.gen(function*() {
   const connection = yield* remote.connect({ versions: [2], params: { info: { name: "test", version: "1" } } })
   return { connection, gateway }
 })
-const run = <A,E>(effect: Effect.Effect<A,E,import("effect/Scope").Scope | import("effect/unstable/process/ChildProcessSpawner").ChildProcessSpawner>) => Effect.runPromise(Effect.scoped(effect).pipe(Effect.provide(BunServices.layer), Effect.timeout("3 seconds")))
+const run = <A,E>(effect: Effect.Effect<A,E,import("effect/Scope").Scope | import("effect/unstable/process/ChildProcessSpawner").ChildProcessSpawner>) => Effect.scoped(effect).pipe(Effect.provide(BunServices.layer), Effect.timeout("10 seconds"))
 
-test("a real subprocess crash records outcomeUnknown and terminates connection waits", () => run(Effect.gen(function*() {
+it.live("a real subprocess crash records outcomeUnknown and terminates connection waits", () => run(Effect.gen(function*() {
   const h = yield* harness
-  const result = yield* Effect.exit(h.connection.request("_fixture/crash", {}))
-  expect(Exit.isFailure(result) && (yield* Json.encode(result.cause))).toContain("OutcomeUnknown")
+  expect(yield* failure(h.connection.request("_fixture/crash", {}))).toMatchObject({ code: "OutcomeUnknown" })
   expect((yield* h.connection.closed)._tag).toBe("AcpConnectionClosed")
   const operations = yield* h.gateway.pendingOperations
   expect((yield* h.gateway.retry(operations[operations.length - 1]!)).status).toBe("outcomeUnknown")
-})))
+})), 15_000)
 
-test("retention releases a real subprocess that never answers session close", () => run(Effect.gen(function*() {
+it.live("retention releases a real subprocess that never answers session close", () => run(Effect.gen(function*() {
   const h = yield* harness
   const session = yield* h.connection.newSession({ cwd: "/tmp" })
   yield* session.release
   expect((yield* h.connection.closed)._tag).toBe("AcpConnectionClosed")
-})))
+})), 15_000)

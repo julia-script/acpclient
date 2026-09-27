@@ -7,7 +7,7 @@
  *
  */
 import * as Schema from "effect/Schema"
-import { type RequestId } from "./AcpSchema.ts"
+import { RequestId } from "./AcpSchema.ts"
 import * as V1 from "./protocol/v1/Schema.ts"
 import * as V2 from "./protocol/v2/Schema.ts"
 
@@ -236,7 +236,7 @@ export type SubmissionSnapshot = {
   readonly prompt: ReadonlyArray<V2.ContentBlock>
   readonly status: SubmissionStatus
   /** The wire request id this submission dispatched under, if any. */
-  readonly requestId: RequestId | null
+  readonly requestId: RequestId
   /**
    * The agent message id reported on acceptance, or null while unavailable.
    * Always null for v1, where acceptance is unavailable.
@@ -251,7 +251,7 @@ export const SubmissionSnapshot: Schema.Codec<SubmissionSnapshot> = Schema.Struc
   id: SubmissionId,
   prompt: Schema.Array(V2.ContentBlock),
   status: SubmissionStatus,
-  requestId: Schema.Union([Schema.String, Schema.Finite, Schema.Null]),
+  requestId: RequestId,
   agentMessageId: Schema.Union([Schema.String, Schema.Null]),
   acceptanceUnavailable: Schema.Boolean,
   foreground: ForegroundProvenance

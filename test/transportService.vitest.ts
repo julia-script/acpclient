@@ -1,4 +1,4 @@
-import { expect, expectTypeOf, test } from "bun:test"
+import { expect, expectTypeOf, it } from "@effect/vitest"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
@@ -13,7 +13,7 @@ import { driver } from "./support/driver.ts"
 
 class EndpointConfig extends Context.Service<EndpointConfig, { readonly label: string }>()("test/EndpointConfig") {}
 
-test("connection consumers use the transport service through Layers", () => Effect.runPromise(Effect.scoped(Effect.gen(function*() {
+it.effect("connection consumers use the transport service through Layers", () => Effect.scoped(Effect.gen(function*() {
   const pair = yield* InMemory.make()
   const peer = yield* Effect.flatMap(pair.right, driver)
   yield* Effect.forkScoped(Effect.gen(function*() {
@@ -25,9 +25,9 @@ test("connection consumers use the transport service through Layers", () => Effe
     return yield* connection.requestRaw("echo", {})
   }).pipe(Effect.provide(AcpConnection.layer().pipe(Layer.provide(InMemory.layer(pair.left)))))
   expect(reply).toBe("from peer")
-}))))
+})))
 
-test("a connector captures dependencies and acquires separate transport lifetimes", () => Effect.runPromise(Effect.scoped(Effect.gen(function*() {
+it.effect("a connector captures dependencies and acquires separate transport lifetimes", () => Effect.scoped(Effect.gen(function*() {
   let opened = 0
   const closed: Array<number> = []
   const writes: Array<string> = []
@@ -53,9 +53,9 @@ test("a connector captures dependencies and acquires separate transport lifetime
   expect(writes).toEqual(["injected:2:still live"])
   yield* Scope.close(secondScope, Exit.void)
   expect(closed).toEqual([1, 2])
-}))))
+})))
 
-test("the connection declares its transport dependency", () => {
+it("the connection declares its transport dependency", () => {
   expectTypeOf<Effect.Services<ReturnType<typeof AcpConnection.make>>>().toEqualTypeOf<AcpTransport | Scope.Scope>()
   expectTypeOf<AcpTransport["Service"]>().toEqualTypeOf<Transport>()
 })

@@ -40,9 +40,11 @@
     "typecheck": "tsc --noEmit -p .",
     "lint": "oxlint --disable-nested-config --deny-warnings .",
     "lint:fix": "oxlint --disable-nested-config --deny-warnings --fix .",
-    "test": "bun test",
+    "test": "bun run test:effect && bun run test:types",
+    "test:effect": "bunx --bun vitest run",
+    "test:types": "tstyche --target 6.0.3",
     "check:browser": "bun scripts/check-browser.ts",
-    "check": "bun run generate:check && bun run typecheck && bun run build && bun run lint && bun run check:docs && bun test && bun run check:browser",
+    "check": "bun run generate:check && bun run typecheck && bun run build && bun run lint && bun run check:docs && bun run test && bun run check:browser",
     "check:docs": "bun scripts/check-docs.ts",
     "build": "tsc -p tsconfig.build.json",
     "prepack": "bun run build"
@@ -51,16 +53,17 @@
     "@effect/platform-bun": "4.0.0-rc.115",
     "@effect/platform-node": "4.0.0-rc.115",
     "@effect/tsgo": "0.45.0",
+    "@effect/vitest": "4.0.0-rc.115",
     "@types/bun": "latest",
     "ajv": "^8",
-    "oxlint-tsgolint": "7.0.2001",
+    "effect": "4.0.0-rc.115",
     "oxlint": "1.82.0",
-    "typescript": "7.0.2"
+    "oxlint-tsgolint": "7.0.2001",
+    "tstyche": "7.2.5",
+    "typescript": "7.0.2",
+    "vitest": "5.0.0"
   },
   "peerDependencies": {
-    "typescript": "^7"
-  },
-  "dependencies": {
     "effect": "4.0.0-rc.115"
   },
   "main": "./dist/index.js",

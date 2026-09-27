@@ -4,7 +4,7 @@ import { failure } from "./support/failure.ts"
 import * as Json from "../src/internal/json.ts"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as NodeServices from "@effect/platform-node/NodeServices"
-import { describe, expect, expectTypeOf, test } from "bun:test"
+import { describe, expect, expectTypeOf, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
@@ -21,13 +21,13 @@ import * as AcpConnection from "../src/AcpConnection.ts"
 import * as AcpProtocol from "../src/AcpProtocol.ts"
 import * as Framing from "../src/internal/framing.ts"
 import * as Stdio from "../src/transport/Stdio.ts"
-import { processGone, stdioCommand } from "./support/compositions.ts"
+import { processGone, processStarted, stdioCommand } from "./support/compositions.ts"
 
 const path = Effect.runSync(Effect.provide(Path.Path, Path.layer))
 const join = (...segments: string[]) => path.join(...segments)
 
 const run = <A, E>(effect: Effect.Effect<A, E, Scope.Scope | BunServices.BunServices>) =>
-  Effect.runPromise(Effect.scoped(effect).pipe(Effect.provide(BunServices.layer)))
+  Effect.scoped(effect).pipe(Effect.provide(BunServices.layer))
 
 const bytes = (s: string) => new TextEncoder().encode(s)
 const pidfile = () => Effect.gen(function*() {
@@ -36,7 +36,7 @@ const pidfile = () => Effect.gen(function*() {
 })
 
 describe("newline framing", () => {
-  test("a multibyte character and the delimiter split across reads yield one intact frame", () => {
+  it("a multibyte character and the delimiter split across reads yield one intact frame", () => {
     const decoder = Framing.makeDecoder(1024)
     const input = bytes(`{"text":"héllo 😀"}\n`)
     const frames: Array<string> = []
@@ -45,13 +45,13 @@ describe("newline framing", () => {
     expect(decoder.end()).toBeUndefined()
   })
 
-  test("multiple frames per read stay ordered and partial lines are completed later", () => {
+  it("multiple frames per read stay ordered and partial lines are completed later", () => {
     const decoder = Framing.makeDecoder(1024)
     expect(decoder.push(bytes(`{"a":1}\n{"b":2}\r\n\n{"c":`))).toEqual({ frames: [`{"a":1}`, `{"b":2}`] })
     expect(decoder.push(bytes(`3}\n`))).toEqual({ frames: [`{"c":3}`] })
   })
 
-  test("an oversized partial frame fails after the complete frames before it", () => {
+  it("an oversized partial frame fails after the complete frames before it", () => {
     const decoder = Framing.makeDecoder(10)
     const result = decoder.push(bytes(`{"a":1}\n{"b":2}\n{"long":"xxxxxxxx`))
     expect(result.frames).toEqual([`{"a":1}`, `{"b":2}`])
@@ -61,14 +61,17 @@ describe("newline framing", () => {
     expect(across.push(bytes("78901")).error).toMatchObject({ reason: "FrameTooLarge" })
   })
 
-  test("invalid UTF-8 and truncated input are explicit framing failures", () => {
-    expect(Framing.makeDecoder(10).push(Uint8Array.of(0xff, 10)).error).toMatchObject({ reason: "InvalidFrame" })
+  it("invalid UTF-8 and truncated input are explicit framing failures", () => {
+    const decoded = Framing.makeDecoder(10).push(Uint8Array.of(97, 10, 0xff, 10))
+    expect(decoded.frames).toEqual(["a"])
+    expect(decoded.error).toMatchObject({ _tag: "AcpTransportError", reason: "InvalidFrame" })
+    expect(decoded.error?.cause).toBeInstanceOf(TypeError)
     const truncated = Framing.makeDecoder(10)
     truncated.push(bytes(`{"a"`))
     expect(truncated.end()).toMatchObject({ reason: "InvalidFrame" })
   })
 
-  test("encoding appends one delimiter and rejects embedded newlines and oversized frames", () => {
+  it("encoding appends one delimiter and rejects embedded newlines and oversized frames", () => {
     expect(Framing.encode(`{"a":"é"}`, 100)).toEqual(bytes(`{"a":"é"}\n`))
     expect(Framing.encode("a\nb", 100)).toMatchObject({ reason: "InvalidFrame" })
     expect(Framing.encode("x".repeat(11), 10)).toMatchObject({ reason: "FrameTooLarge" })
@@ -76,7 +79,7 @@ describe("newline framing", () => {
 })
 
 describe("spawned stdio", () => {
-  test("heavy stderr neither blocks nor contaminates protocol frames; the captured tail is bounded", () =>
+  it.live("heavy stderr neither blocks nor contaminates protocol frames; the captured tail is bounded", () =>
     run(Effect.gen(function*() {
       const transport = yield* Stdio.make(stdioCommand({ version: 1 }, (yield* pidfile())), { stderr: { maxBytes: 4096 } })
       const connection = yield* AcpConnection.make({ handlers: {} }).pipe(Effect.provideService(AcpTransport, transport))
@@ -90,7 +93,7 @@ describe("spawned stdio", () => {
       expect(tail).toMatch(/^x+$/)
     })), 20_000)
 
-  test("a crashing agent reports its exit and closes the connection", () =>
+  it.live("a crashing agent reports its exit and closes the connection", () =>
     run(Effect.gen(function*() {
       const pid = yield* pidfile()
       const transport = yield* Stdio.make(stdioCommand({ version: 1 }, pid))
@@ -102,7 +105,7 @@ describe("spawned stdio", () => {
       yield* processGone(pid)
     })), 20_000)
 
-  test("closing the scope releases writers blocked on a child that never reads, and the child", () =>
+  it.live("closing the scope releases writers blocked on a child that never reads, and the child", () =>
     run(Effect.gen(function*() {
       const pid = yield* pidfile()
       const scope = yield* Scope.fork(yield* Scope.Scope)
@@ -110,6 +113,7 @@ describe("spawned stdio", () => {
         Stdio.make(stdioCommand({ version: 1, mode: "no-read" }, pid), { writeBuffer: 1 }),
         scope
       )
+      yield* processStarted(pid)
       const frame = (yield* Json.encode({ jsonrpc: "2.0", method: "_fill", params: { data: "x".repeat(256 * 1024) } }))
       let sent = 0
       const writer = yield* Effect.forkChild(Effect.forever(Effect.andThen(transport.send(frame), Effect.sync(() => sent++))))
@@ -120,13 +124,12 @@ describe("spawned stdio", () => {
         yield* Effect.sleep("200 millis")
       }
       yield* Scope.close(scope, Exit.void)
-      const exit = yield* Fiber.await(writer)
-      expect(Exit.isFailure(exit) && (yield* Json.encode(exit.cause))).toContain("Closed")
+      expect(yield* failure(Fiber.join(writer))).toMatchObject({ _tag: "AcpTransportError", reason: "Closed" })
       yield* processGone(pid)
     })), 20_000)
 
-  test("a stdin write failure terminates the connection while stdout stays open", () =>
-    Effect.runPromise(Effect.scoped(Effect.gen(function*() {
+  it.effect("a stdin write failure terminates the connection while stdout stays open", () =>
+    Effect.scoped(Effect.gen(function*() {
       // A child whose stdin is gone but whose stdout never closes: only the
       // write failure can end the connection.
       const epipe = PlatformError.systemError({ _tag: "Unknown", module: "test", method: "write", description: "EPIPE" })
@@ -153,16 +156,16 @@ describe("spawned stdio", () => {
       expect(yield* failure(accepted.response)).toMatchObject({ _tag: "AcpConnectionClosed" })
       expect((yield* connection.closed)._tag).toBe("AcpConnectionClosed")
       expect(yield* failure(transport.send("{}"))).toMatchObject({ reason: "Closed" })
-    }))), 5_000)
+    })), 5_000)
 
-  test("the Node platform adapter composes the same way", () =>
-    Effect.runPromise(Effect.scoped(Effect.gen(function*() {
+  it.live("the Node platform adapter composes the same way", () =>
+    Effect.scoped(Effect.gen(function*() {
       const { negotiated } = yield* AcpProtocol.connect({ versions: [2, 1], params: { info: { name: "n", version: "0" }, capabilities: {} } })
         .pipe(Effect.provide(AcpConnector.layer(Stdio.layer(stdioCommand({ version: 2 }, (yield* pidfile())))).pipe(Layer.provide(NodeServices.layer))))
       expect(negotiated.version).toBe(2)
-    })).pipe(Effect.provide(NodeServices.layer))), 20_000)
+    })).pipe(Effect.provide(NodeServices.layer)), 20_000)
 
-  test("construction requires an injected process runtime", () => {
+  it("construction requires an injected process runtime", () => {
     expectTypeOf<Effect.Services<ReturnType<typeof Stdio.make>>>().toEqualTypeOf<ChildProcessSpawner.ChildProcessSpawner | Scope.Scope>()
   })
 })

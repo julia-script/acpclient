@@ -12,6 +12,7 @@
  * carries only ACP frames.
  */
 import * as BunServices from "@effect/platform-bun/BunServices"
+import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as AcpAgent from "effect-acp/AcpAgent"
@@ -59,8 +60,8 @@ const agent = AcpAgent.make({
 })
 
 // The author supplies storage and process I/O; the agent supplies the protocol.
-Effect.runFork(
-  Effect.scoped(AcpAgent.serveStdio(agent)).pipe(
+if (import.meta.main) {
+  BunRuntime.runMain(Effect.scoped(Effect.flatMap(agent, AcpAgent.serveStdio)).pipe(
     Effect.provide(Layer.mergeAll(Store.layer, BunServices.layer))
-  )
-)
+  ))
+}

@@ -52,7 +52,7 @@ export const agent = AcpAgent.make({
 })
 
 if (import.meta.main) {
-  BunRuntime.runMain(Effect.scoped(AcpAgent.serveStdio(agent)).pipe(
+  BunRuntime.runMain(Effect.scoped(Effect.flatMap(agent, AcpAgent.serveStdio)).pipe(
     Effect.provide(Layer.mergeAll(Store.layer, BunServices.layer))
   ))
 }
@@ -106,7 +106,9 @@ const program = Effect.gen(function*() {
   yield* Console.log(`Turn state: ${snapshot.foreground.state}`)
 })
 
-BunRuntime.runMain(Effect.scoped(program).pipe(Effect.provide(ClientLive)))
+if (import.meta.main) {
+  BunRuntime.runMain(Effect.scoped(program).pipe(Effect.provide(ClientLive)))
+}
 ```
 
 The layers provide a stdio transport, a connector, and the application client. The scope keeps the child process alive until the exchange is complete and releases it when the program finishes.

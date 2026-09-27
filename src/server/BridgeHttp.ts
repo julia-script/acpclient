@@ -53,9 +53,9 @@ export class Rejected extends Schema.TaggedError<Rejected>()("BridgeHttpRejected
   message: Schema.String,
   /** Which boundary refused the request: `profile`, `origin`, `auth`, or `launch`. */
   reason: Schema.optional(Schema.String)
-}) {}
+}, { identifier: "effect-acp/server/BridgeHttp/Rejected" }) {}
 
-export interface Options<A> {
+export interface Options<A, AuthR = never, LaunchR = never> {
   /** Path to mount the upgrade route on. Default `/acp`. */
   readonly path?: `/${string}` | undefined
   /**
@@ -63,7 +63,7 @@ export interface Options<A> {
    * is reported as HTTP 401 and never spawns a process. Returning a launch
    * error with a status overrides the denial status.
    */
-  readonly authenticate: (request: HttpServerRequest.HttpServerRequest) => Effect.Effect<A, Rejected>
+  readonly authenticate: (request: HttpServerRequest.HttpServerRequest) => Effect.Effect<A, Rejected, AuthR>
   /**
    * Origin policy applied before upgrade. Receives the `Origin` header value
    * (`undefined` when absent) and returns whether it may connect. Required explicitly.
@@ -76,7 +76,7 @@ export interface Options<A> {
    * permitted commands. Its failure is reported as HTTP 403 (or its own status)
    * and never spawns a process.
    */
-  readonly resolveLaunch: (principal: A, selection: LaunchSelection) => Effect.Effect<ChildProcess.Command, Rejected>
+  readonly resolveLaunch: (principal: A, selection: LaunchSelection) => Effect.Effect<ChildProcess.Command, Rejected, LaunchR>
   /** Largest frame accepted on either hop, in bytes. Default 16 MiB. */
   readonly maxFrameBytes?: number | undefined
   /** Frames buffered by the WebSocket hop before reading pauses. Default 64. */
@@ -91,6 +91,7 @@ export interface Options<A> {
 export const defaultPath = "/acp"
 
 const unauthorized = HttpStatus.fromLiteral("Unauthorized")
+const badRequest = HttpStatus.fromLiteral("BadRequest")
 const forbidden = HttpStatus.fromLiteral("Forbidden")
 const upgradeRequired = HttpStatus.fromLiteral("UpgradeRequired")
 
@@ -107,17 +108,19 @@ const launchSelection = (
 /**
  * Adds the bridge upgrade route to the current `HttpRouter`. `A` is the
  * principal value `authenticate` produces and `resolveLaunch` consumes; it is
- * an ordinary value, not a service, so the route only requires a
- * `ChildProcessSpawner` when matched. Mount it with `HttpRouter.addAll` on the
- * server that provides that service.
+ * an ordinary value, not a service. The route requires the services used by
+ * those callbacks and a `ChildProcessSpawner` when matched. Mount it with
+ * `HttpRouter.addAll` on a server that provides them.
  */
-export const route = <A>(options: Options<A>): HttpRouter.Route<never, ChildProcessSpawner> =>
+export const route = <A, AuthR = never, LaunchR = never>(
+  options: Options<A, AuthR, LaunchR>
+): HttpRouter.Route<never, ChildProcessSpawner | AuthR | LaunchR> =>
   HttpRouter.route("GET", options.path ?? defaultPath, handler(options))
 
-const handler = <A>(options: Options<A>): Effect.Effect<
+const handler = <A, AuthR, LaunchR>(options: Options<A, AuthR, LaunchR>): Effect.Effect<
   HttpServerResponse.HttpServerResponse,
   never,
-  Scope.Scope | HttpServerRequest.HttpServerRequest | ChildProcessSpawner
+  Scope.Scope | HttpServerRequest.HttpServerRequest | ChildProcessSpawner | AuthR | LaunchR
 > =>
   Effect.gen(function*() {
     const request = yield* HttpServerRequest.HttpServerRequest
@@ -150,9 +153,15 @@ const handler = <A>(options: Options<A>): Effect.Effect<
 
     // Parsed from the request URL rather than the `ParsedSearchParams` service
     // so mounting the route does not require that service in its context.
-    const selection = launchSelection(
-      HttpServerRequest.searchParamsFromURL(new URL(request.url, "http://localhost"))
-    )
+    const url = yield* Effect.try({
+      try: () => new URL(request.url, "http://localhost"),
+      catch: () => new Rejected({
+        status: badRequest,
+        message: "Invalid request URL",
+        reason: "launch"
+      })
+    })
+    const selection = launchSelection(HttpServerRequest.searchParamsFromURL(url))
     const launch = yield* options.resolveLaunch(principal, selection).pipe(
       Effect.mapError((rejected) =>
         rejected.status === undefined

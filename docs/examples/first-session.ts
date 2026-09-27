@@ -38,4 +38,6 @@ const program = Effect.gen(function*() {
   yield* Console.log(`Turn state: ${snapshot.foreground.state}`)
 })
 
-BunRuntime.runMain(Effect.scoped(program).pipe(Effect.provide(ClientLive)))
+if (import.meta.main) {
+  BunRuntime.runMain(Effect.scoped(program).pipe(Effect.provide(ClientLive)))
+}

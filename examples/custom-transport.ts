@@ -5,6 +5,7 @@
  *
  *   bun examples/custom-transport.ts
  */
+import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Queue from "effect/Queue"
@@ -38,19 +39,24 @@ const fromMessagePort = (port: MessagePort) =>
     return transport
   })
 
-const channel = new MessageChannel()
+const program = Effect.scoped(Effect.gen(function*() {
+  const channel = yield* Effect.acquireRelease(
+    Effect.sync(() => new MessageChannel()),
+    (channel) => Effect.sync(() => {
+      channel.port1.close()
+      channel.port2.close()
+    })
+  )
+  // An agent on the other port (here: the in-process fixture agent).
+  const onLine = createAgent({ version: 1 }, (line) => channel.port2.postMessage(line))
+  channel.port2.onmessage = (event) => onLine(event.data)
 
-// An agent on the other port (here: the in-process fixture agent).
-const onLine = createAgent({ version: 1 }, (line) => channel.port2.postMessage(line))
-channel.port2.onmessage = (event) => onLine(event.data)
-
-const program = Effect.gen(function*() {
   const { negotiated } = yield* AcpProtocol.connect({
     params: { clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false } }
-  })
+  }).pipe(Effect.provide(AcpConnector.layer(AcpTransport.layer(fromMessagePort(channel.port1)))))
   yield* Effect.log(`connected over MessagePort using ACP v${negotiated.version}`)
-})
+}))
 
-await Effect.runPromise(
-  Effect.scoped(program).pipe(Effect.provide(AcpConnector.layer(AcpTransport.layer(fromMessagePort(channel.port1)))))
-).finally(() => channel.port2.close())
+if (import.meta.main) {
+  BunRuntime.runMain(program)
+}

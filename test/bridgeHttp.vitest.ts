@@ -4,10 +4,11 @@
  * spawning a process. Every denial path asserts the injected spawner was never
  * invoked, which is the security-critical claim of the bridge route.
  */
-import { describe, expect, test } from "bun:test"
+import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as HttpRouter from "effect/unstable/http/HttpRouter"
+import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { ChildProcessSpawner, make as makeSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import * as BridgeHttp from "../src/server/BridgeHttp.ts"
@@ -49,10 +50,9 @@ const handlerFor = (
     Layer.provideMerge(options.spawnerLayer),
     Layer.provideMerge(HttpRouter.layer)
   )
-  const { dispose, handler } = HttpRouter.toWebHandler(appLayer, { disableLogger: true })
-  return Object.assign(
-    (request: Request) => handler(request),
-    { dispose }
+  return Effect.acquireRelease(
+    Effect.sync(() => HttpRouter.toWebHandler(appLayer, { disableLogger: true })),
+    ({ dispose }) => Effect.promise(dispose)
   )
 }
 
@@ -62,9 +62,32 @@ const upgradeRequest = (
 ) => new Request(url, { headers })
 
 describe("BridgeHttp route authorization", () => {
-  test("rejects a request that does not offer the required subprotocol without spawning", () => Effect.runPromise(Effect.gen(function*() {
+  it.effect("rejects a malformed request URL before launch or upgrade", () => Effect.scoped(Effect.gen(function*() {
     const spawner = trackingSpawner()
-    const handler = handlerFor({ spawnerLayer: spawner.layer })
+    let launches = 0
+    const route = BridgeHttp.route({
+      authenticate: () => Effect.succeed(principal),
+      allowOrigin: () => true,
+      resolveLaunch: () => {
+        launches++
+        return Effect.succeed(allowedCommand)
+      }
+    })
+    const request = HttpServerRequest.fromWeb(upgradeRequest("http://localhost/acp"))
+      .modify({ url: "http://[" })
+    const response = yield* route.handler.pipe(
+      Effect.provideService(HttpServerRequest.HttpServerRequest, request),
+      Effect.provide(spawner.layer)
+    )
+
+    expect(response.status).toBe(400)
+    expect(launches).toBe(0)
+    expect(spawner.spawns).toEqual([])
+  })))
+
+  it.effect("rejects a request that does not offer the required subprotocol without spawning", () => Effect.scoped(Effect.gen(function*() {
+    const spawner = trackingSpawner()
+    const { handler } = yield* handlerFor({ spawnerLayer: spawner.layer })
 
     const response = (yield* Effect.promise(() => handler(upgradeRequest("http://localhost/acp", {}))))
 
@@ -72,9 +95,9 @@ describe("BridgeHttp route authorization", () => {
     expect(spawner.spawns).toEqual([])
   })))
 
-  test("rejects a disallowed origin without spawning", () => Effect.runPromise(Effect.gen(function*() {
+  it.effect("rejects a disallowed origin without spawning", () => Effect.scoped(Effect.gen(function*() {
     const spawner = trackingSpawner()
-    const handler = handlerFor({
+    const { handler } = yield* handlerFor({
       spawnerLayer: spawner.layer,
       allowOrigin: (origin) => origin === "https://allowed.example"
     })
@@ -88,9 +111,9 @@ describe("BridgeHttp route authorization", () => {
     expect(spawner.spawns).toEqual([])
   })))
 
-  test("rejects a failed authentication with 401 and without spawning", () => Effect.runPromise(Effect.gen(function*() {
+  it.effect("rejects a failed authentication with 401 and without spawning", () => Effect.scoped(Effect.gen(function*() {
     const spawner = trackingSpawner()
-    const handler = handlerFor({
+    const { handler } = yield* handlerFor({
       spawnerLayer: spawner.layer,
       authenticate: () => Effect.fail(new BridgeHttp.Rejected({ message: "no token" }))
     })
@@ -101,9 +124,9 @@ describe("BridgeHttp route authorization", () => {
     expect(spawner.spawns).toEqual([])
   })))
 
-  test("rejects a browser-supplied executable outside the permitted profiles without spawning", () => Effect.runPromise(Effect.gen(function*() {
+  it.effect("rejects a browser-supplied executable outside the permitted profiles without spawning", () => Effect.scoped(Effect.gen(function*() {
     const spawner = trackingSpawner()
-    const handler = handlerFor({
+    const { handler } = yield* handlerFor({
       spawnerLayer: spawner.layer,
       // Only named profiles resolve; an arbitrary command never reaches a spawn.
       resolveLaunch: (_principal, selection) =>
@@ -121,10 +144,10 @@ describe("BridgeHttp route authorization", () => {
     expect(spawner.spawns).toEqual([])
   })))
 
-  test("passes the browser's launch selection to the resolver, profile separated from params", () => Effect.runPromise(Effect.gen(function*() {
+  it.effect("passes the browser's launch selection to the resolver, profile separated from params", () => Effect.scoped(Effect.gen(function*() {
     const spawner = trackingSpawner()
     let seen: BridgeHttp.LaunchSelection | undefined
-    const handler = handlerFor({
+    const { handler } = yield* handlerFor({
       spawnerLayer: spawner.layer,
       resolveLaunch: (_principal, selection) => {
         seen = selection

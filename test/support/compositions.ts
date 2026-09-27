@@ -14,6 +14,7 @@ import * as Stream from "effect/Stream"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
+import { fileURLToPath } from "node:url"
 import * as AcpConnector from "../../src/AcpConnector.ts"
 import * as InMemory from "../../src/transport/InMemory.ts"
 import * as Stdio from "../../src/transport/Stdio.ts"
@@ -29,31 +30,34 @@ export interface Composition {
   readonly released: Effect.Effect<void>
 }
 
-export type Compose = (options: AgentOptions) => Effect.Effect<Composition>
+export type Compose = (options: AgentOptions) => Effect.Effect<Composition, never, Scope.Scope>
 
-export const agentPath = join(import.meta.dir, "..", "fixtures", "agent.ts")
+export const agentPath = join(fileURLToPath(new URL(".", import.meta.url)), "..", "fixtures", "agent.ts")
 
 export const inMemory: Compose = (options) =>
   Effect.gen(function*() {
     const released = yield* Deferred.make<void>()
+    const fixtureScope = yield* Scope.fork(yield* Scope.Scope)
     const connect = Effect.gen(function*() {
       const pair = yield* InMemory.make()
       // The agent lives outside the client's scope, like a separate process.
-      const agentScope = yield* Scope.make()
+      const agentScope = yield* Scope.fork(fixtureScope)
       const agentEnd = yield* Scope.provide(pair.right, agentScope)
       const outbox = yield* Queue.unbounded<string>()
       const runFork = Effect.runForkWith(yield* Effect.context())
       const onLine = createAgent({
         ...options,
-        exit: () => void runFork(Scope.close(agentScope, Exit.void))
-      }, (line) => void Queue.offerUnsafe(outbox, line))
+        exit: () => { void runFork(Effect.forkIn(Scope.close(agentScope, Exit.void), fixtureScope)) }
+      }, (line) => void Queue.offerUnsafe(outbox, line), (effect) => {
+        void runFork(Effect.forkIn(effect, agentScope))
+      })
       yield* Stream.fromQueue(outbox).pipe(Stream.runForEach(agentEnd.send), Effect.ignore, Effect.forkIn(agentScope))
       yield* agentEnd.incoming.pipe(
         Stream.runForEach((line) => Effect.sync(() => onLine(line))),
         Effect.exit,
-        Effect.andThen(Deferred.succeed(released, undefined)),
         Effect.andThen(Scope.close(agentScope, Exit.void)),
-        Effect.forkDetach
+        Effect.andThen(Deferred.succeed(released, undefined)),
+        Effect.forkIn(fixtureScope)
       )
       return yield* pair.left
     })
@@ -69,10 +73,19 @@ const isRunning = (pid: number) => {
   }
 }
 
+/** Waits until the fixture records a process ID, including under runner load. */
+export const processStarted = (pidfile: string) =>
+  Effect.gen(function*() {
+    const fs = yield* FileSystem.FileSystem
+    for (let i = 0; i < 100 && !(yield* fs.exists(pidfile)); i++) yield* Effect.sleep("20 millis")
+    if (!(yield* fs.exists(pidfile))) return yield* Effect.die(`fixture pidfile never appeared: ${pidfile}`)
+    return Number(yield* fs.readFileString(pidfile))
+  }).pipe(Effect.provide(BunServices.layer), Effect.orDie)
+
 /** Waits until the process recorded in `pidfile` no longer exists. */
 export const processGone = (pidfile: string) =>
   Effect.gen(function*() {
-    const pid = Number(yield* Effect.promise(() => Bun.file(pidfile).text()))
+    const pid = yield* processStarted(pidfile)
     for (let i = 0; i < 100 && isRunning(pid); i++) yield* Effect.sleep("20 millis")
     if (isRunning(pid)) return yield* Effect.die(`process ${pid} still running`)
   })
@@ -86,7 +99,7 @@ export const stdioCommand = (options: AgentOptions, pidfile: string) =>
 export const stdio: Compose = (options) =>
   Effect.gen(function*() {
     const fs = yield* FileSystem.FileSystem
-    const pidfile = join(yield* fs.makeTempDirectory({ prefix: "acp-agent-" }), "pid")
+    const pidfile = join(yield* fs.makeTempDirectoryScoped({ prefix: "acp-agent-" }), "pid")
     return {
       name: "stdio",
       connector: AcpConnector.layer(Stdio.layer(stdioCommand(options, pidfile))).pipe(Layer.provide(BunServices.layer)),

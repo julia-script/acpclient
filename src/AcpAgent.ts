@@ -39,6 +39,7 @@ import * as Data from "effect/Data"
  *
  */
 import * as Cause from "effect/Cause"
+import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Deferred from "effect/Deferred"
 import * as Exit from "effect/Exit"
@@ -67,7 +68,7 @@ export type Version = 1 | 2
 /**
  * An agent's advertised capabilities do not match its installed handlers.
  *
- * Raised by {@link make} before anything is served, so a misconfigured agent
+ * Returned by {@link make} before anything is served, so a misconfigured agent
  * never accepts a connection it cannot honor.
  */
 export class AcpAgentConfigError extends Data.TaggedError("AcpAgentConfigError")<{ readonly missing: string; readonly message: string }> {
@@ -299,7 +300,7 @@ export interface AcpAgent<R = never> {
  * The capability set this agent advertises for `version`.
  *
  * Only surfaces with an installed handler are advertised, so the wire never
- * promises more than {@link make} validated.
+ * promises more than construction validated.
  */
 const advertisement = <R>(options: Options<R>, version: Version): V1.InitializeResponse | V2.InitializeResponse => {
   const methods = options.auth?.methods ?? []
@@ -360,22 +361,35 @@ interface SessionState {
   inserting?: boolean
   running: Fiber.Fiber<StopReason, HandlerError> | undefined
   cancelled: boolean
+  cancelling: boolean
 }
 
 /**
  * Builds an agent from handlers, validating that everything it would
- * advertise is actually installed.
- *
- * Fails synchronously (by throwing `AcpAgentConfigError`) rather than at the
- * first connection: a capability surface the agent cannot honor is a
- * programming error, not a runtime condition.
+ * advertise is actually installed. Configuration failures are typed; other
+ * construction defects remain defects.
  */
-export const make = <R = never>(options: Options<R>): AcpAgent<R> => {
+export const make = <R = never>(options: Options<R>): Effect.Effect<AcpAgent<R>, AcpAgentConfigError> =>
+  Effect.suspend(() => {
+    const invalid = validate(options)
+    return invalid ? Effect.fail(invalid) : Effect.sync(() => build(options))
+  })
+
+/**
+ * Builds an agent synchronously. Use this when the configuration is known to
+ * be valid; an invalid configuration throws `AcpAgentConfigError`.
+ */
+export const makeUnsafe = <R = never>(options: Options<R>): AcpAgent<R> => {
   const invalid = validate(options)
   if (invalid) throw invalid
+  return build(options)
+}
+
+const build = <R>(options: Options<R>): AcpAgent<R> => {
   const enabled: ReadonlyArray<Version> = options.versions ?? [1]
 
   const serve = Effect.gen(function*() {
+      const serveScope = yield* Scope.Scope
       const store = yield* Effect.service(Store)
       // Routes must be `Effect<_, _, never>`, so capture the author's services
       // once here and provide them to every handler effect.
@@ -390,6 +404,7 @@ export const make = <R = never>(options: Options<R>): AcpAgent<R> => {
         Effect.suspend(() => {
           const state = sessions.get(sessionId)
           if (!state) return Effect.void
+          state.cancelled = true
           sessions.delete(sessionId)
           return Scope.close(state.scope, Exit.void).pipe(Effect.ignore)
         })
@@ -407,19 +422,19 @@ export const make = <R = never>(options: Options<R>): AcpAgent<R> => {
           const payload = version === 2
             ? { sessionUpdate, messageId, content }
             : { sessionUpdate, content }
-          return Effect.andThen(
-            // Retention is the store's guarantee, not the library's: we record
-            // what we emit and let the store decide what survives.
-            store.retain({
+          return Effect.gen(function*() {
+            // Retention is the store's guarantee: it keeps the first instant
+            // when a later chunk or replacement updates this message.
+            yield* store.retain({
               sessionId,
               messageId,
               role: kind === "thought" ? "thought" : kind,
               replacement: null,
               chunks: [content],
-              recordedAt: "1970-01-01T00:00:00.000Z"
-            }).pipe(Effect.ignore),
-            notify(sessionId, payload)
-          )
+              recordedAt: yield* DateTime.now
+            }).pipe(Effect.ignore)
+            yield* notify(sessionId, payload)
+          })
         }
         return {
           version,
@@ -431,21 +446,21 @@ export const make = <R = never>(options: Options<R>): AcpAgent<R> => {
               ? Effect.fail(
                 new AcpAgentError({ message: "Full message replacement requires protocol v2" })
               )
-              : Effect.andThen(
-                store.retain({
+              : Effect.gen(function*() {
+                yield* store.retain({
                   sessionId,
                   messageId,
                   role,
                   replacement: content,
                   chunks: [],
-                  recordedAt: "1970-01-01T00:00:00.000Z"
-                }).pipe(Effect.ignore),
-                notify(sessionId, {
+                  recordedAt: yield* DateTime.now
+                }).pipe(Effect.ignore)
+                yield* notify(sessionId, {
                   sessionUpdate: messageRole(role),
                   messageId,
                   content
                 })
-              ),
+              }),
           raw: (update) => notify(sessionId, update)
         }
       }
@@ -494,6 +509,13 @@ export const make = <R = never>(options: Options<R>): AcpAgent<R> => {
 
       // --- request handling --------------------------------------------------
 
+      const logPrivateError = (cause: Cause.Cause<unknown>) => {
+        const reason = cause.reasons.length === 1 ? cause.reasons[0] : undefined
+        return reason && Cause.isFailReason(reason) && reason.error instanceof StoreError && reason.error.kind !== "SessionError"
+          ? Effect.logError("Agent store operation failed", cause)
+          : Effect.void
+      }
+
       const requirePeer = Effect.suspend(() =>
         peer === undefined
           ? Effect.fail(new AcpRemoteError({ code: ErrorCode.InvalidRequest, message: "Not initialized" }))
@@ -502,6 +524,7 @@ export const make = <R = never>(options: Options<R>): AcpAgent<R> => {
 
       const requireSession = (sessionId: string) =>
         store.get(sessionId).pipe(
+          Effect.tapCause(logPrivateError),
           Effect.mapError(toRemote),
           Effect.filterOrFail(
             (session) => session !== undefined,
@@ -516,12 +539,12 @@ export const make = <R = never>(options: Options<R>): AcpAgent<R> => {
        */
       const handler = <A>(effect: Effect.Effect<A, HandlerError, R>) =>
         effect.pipe(
+          Effect.tapCause(logPrivateError),
           Effect.mapError(toRemote),
-          Effect.catchDefect(() =>
-            Effect.andThen(
-              Effect.logError("Agent handler failed"),
-              Effect.fail(new AcpRemoteError({ code: ErrorCode.InternalError, message: "Internal error" }))
-            )
+          Effect.catchCauseIf(
+            (cause) => cause.reasons.some(Cause.isDieReason) && !Cause.hasInterrupts(cause),
+            (cause) => Effect.andThen(Effect.logError("Agent handler failed", cause),
+              Effect.fail(new AcpRemoteError({ code: ErrorCode.InternalError, message: "Internal error" })))
           ),
           provided
         )
@@ -558,7 +581,7 @@ export const make = <R = never>(options: Options<R>): AcpAgent<R> => {
             sessionId: created.sessionId,
             cwd: request.cwd,
             additionalDirectories: request.additionalDirectories ?? null
-          }).pipe(Effect.mapError(toRemote))
+          }).pipe(Effect.tapCause(logPrivateError), Effect.mapError(toRemote))
           return { sessionId: created.sessionId }
         })
 
@@ -572,11 +595,14 @@ export const make = <R = never>(options: Options<R>): AcpAgent<R> => {
           // leaving the session running forever. Interruption (cancellation)
           // passes through, so its own completion signal is emitted instead.
           const stopReason = yield* options.prompt.execute({ ...context, prompt, messageId, emit, client }).pipe(
-            Effect.catchCause((cause) =>
-              Cause.hasInterrupts(cause)
-                ? Effect.failCause(Cause.fromReasons<never>(cause.reasons.filter(Cause.isInterruptReason)))
-                : Effect.andThen(Effect.logError("Agent execution failed"), Effect.succeed<StopReason>("refusal"))
-            )
+            Effect.catchCause((cause) => {
+              if (Cause.hasInterruptsOnly(cause)) return Effect.failCause(cause)
+              if (Cause.hasInterrupts(cause)) {
+                // V1's request boundary logs this failure; V2 has already replied.
+                return context.version === 1 ? Effect.failCause(cause) : Effect.andThen(Effect.logError("Agent execution failed", cause), Effect.failCause(cause))
+              }
+              return Effect.andThen(Effect.logError("Agent execution failed", cause), Effect.succeed<StopReason>("refusal"))
+            })
           )
           // Final updates precede the idle signal.
           yield* emitIdle(context.sessionId, context.version, stopReason)
@@ -593,9 +619,9 @@ export const make = <R = never>(options: Options<R>): AcpAgent<R> => {
             version: current.version,
             peer: current
           }
-          const state: SessionState = sessions.get(request.sessionId) ?? { scope: yield* Scope.make(), running: undefined, cancelled: false }
+          const state: SessionState = sessions.get(request.sessionId) ?? { scope: yield* Scope.fork(serveScope), running: undefined, cancelled: false, cancelling: false }
           sessions.set(request.sessionId, state)
-          if (state.running || state.inserting) return yield* new AcpRemoteError({ code: ErrorCode.InvalidRequest, message: "Session is busy" })
+          if (state.running || state.inserting || state.cancelling) return yield* new AcpRemoteError({ code: ErrorCode.InvalidRequest, message: "Session is busy" })
           state.inserting = true
           state.cancelled = false
           const inserted = yield* handler(Effect.suspend(() => options.prompt.insert({ ...context, prompt: request.prompt }))).pipe(Effect.onExit((exit) => Exit.isFailure(exit) ? Effect.sync(() => { state.inserting = false }) : Effect.void))
@@ -606,8 +632,8 @@ export const make = <R = never>(options: Options<R>): AcpAgent<R> => {
             role: "user",
             replacement: [...request.prompt],
             chunks: [],
-            recordedAt: "1970-01-01T00:00:00.000Z"
-          }).pipe(Effect.mapError(toRemote))
+            recordedAt: yield* DateTime.now
+          }).pipe(Effect.tapCause(logPrivateError), Effect.mapError(toRemote))
 
           if (state.cancelled) {
             state.inserting = false
@@ -617,9 +643,12 @@ export const make = <R = never>(options: Options<R>): AcpAgent<R> => {
           const started = yield* Deferred.make<void>()
           const completed = yield* Deferred.make<StopReason, HandlerError>()
           const work = Deferred.await(started).pipe(Effect.andThen(execute(context, request.prompt, inserted.messageId)),
-            Effect.catchCause((cause) => state.cancelled ? Effect.succeed<StopReason>("cancelled") : Effect.failCause(cause)),
+            Effect.catchCauseIf((cause) => state.cancelled && Cause.hasInterruptsOnly(cause),
+              () => Effect.succeed<StopReason>("cancelled")),
             Effect.ensuring(Effect.sync(() => { state.running = undefined })),
-            Effect.onExit((exit) => state.cancelled ? Deferred.succeed(completed, "cancelled") : Deferred.done(completed, exit)))
+            Effect.onExit((exit) => state.cancelled && Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)
+              ? Deferred.succeed(completed, "cancelled")
+              : Deferred.done(completed, exit)))
           const fiber = yield* Effect.forkIn(Effect.interruptible(work), state.scope)
           state.running = fiber
           state.inserting = false
@@ -635,23 +664,29 @@ export const make = <R = never>(options: Options<R>): AcpAgent<R> => {
           const { sessionId } = yield* decodeInput(SessionInput, params)
           const state = sessions.get(sessionId)
           const current = peer
-          if (state) state.cancelled = true
-          if (state?.running) {
-            // Interrupting drains the execution's finalizers (its final
-            // updates) before we report the cancelled stop reason.
-            yield* Fiber.interrupt(state.running)
-            state.running = undefined
+          if (state) {
+            state.cancelled = true
+            state.cancelling = true
           }
-          if (options.session.cancel && current) {
-            yield* options.session.cancel({ sessionId, version: current.version, peer: current }).pipe(Effect.ignore)
-          }
-          if (current) yield* emitIdle(sessionId, current.version, "cancelled")
+          yield* Effect.gen(function*() {
+            const running = state?.running
+            if (running) {
+              // Interrupting drains the execution's finalizers (its final
+              // updates) before we report the cancelled stop reason.
+              yield* Fiber.interrupt(running)
+              if (state.running === running) state.running = undefined
+            }
+            if (options.session.cancel && current) {
+              yield* options.session.cancel({ sessionId, version: current.version, peer: current }).pipe(Effect.ignore)
+            }
+            if (current && (!state || sessions.get(sessionId) === state)) yield* emitIdle(sessionId, current.version, "cancelled")
+          }).pipe(Effect.ensuring(Effect.sync(() => { if (state) state.cancelling = false })))
         })
 
       const routes: Array<AcpConnection.Route> = [
         { _tag: "Request", method: "initialize", run: (params) => initialize(params) },
         { _tag: "Request", method: "session/new", run: (params) => newSession(params) },
-        { _tag: "Request", method: "session/prompt", run: (params) => provided(prompt(params)).pipe(Effect.mapError(toRemote)) },
+        { _tag: "Request", method: "session/prompt", run: (params) => provided(prompt(params)).pipe(Effect.tapCause(logPrivateError), Effect.mapError(toRemote)) },
         {
           _tag: "Notification",
           method: "session/cancel",
@@ -674,7 +709,7 @@ export const make = <R = never>(options: Options<R>): AcpAgent<R> => {
                   updatedAt: session.updatedAt ?? null
                 }))
               })),
-              Effect.mapError(toRemote)
+              Effect.tapCause(logPrivateError), Effect.mapError(toRemote)
             )
         })
       }
@@ -715,7 +750,7 @@ export const make = <R = never>(options: Options<R>): AcpAgent<R> => {
               yield* requireSession(sessionId)
               yield* handler(remove({ sessionId, version: current.version, peer: current }))
               yield* ended(sessionId)
-              yield* store.remove(sessionId).pipe(Effect.mapError(toRemote))
+              yield* store.remove(sessionId).pipe(Effect.tapCause(logPrivateError), Effect.mapError(toRemote))
               return {}
             })
         })
@@ -779,7 +814,7 @@ export const make = <R = never>(options: Options<R>): AcpAgent<R> => {
               sessionUpdate: `${role}_chunk`, ...(context.version === 2 ? { messageId: message.messageId } : {}), content
             })
           }
-        }).pipe(Effect.mapError(toRemote))
+        }).pipe(Effect.tapCause(logPrivateError), Effect.mapError(toRemote))
 
       const dispatch = AcpConnection.handlers(routes)
       yield* connection.setHandlers({

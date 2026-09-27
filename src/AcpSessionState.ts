@@ -1,6 +1,7 @@
 import type { InteractionOutcome } from "./AcpApp.ts"
 import * as V1 from "./protocol/v1/Schema.ts"
 import * as Result from "effect/Result"
+import * as Encoding from "effect/Encoding"
 import * as Schema from "effect/Schema"
 import * as Json from "./internal/json.ts"
 /**
@@ -116,6 +117,13 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 /** True when a patch field was supplied at all (`null` counts, omitted does not). */
 const supplied = <S extends object>(source: S, key: keyof S): boolean => Object.hasOwn(source, key)
 
+const own = <A>(record: Readonly<Record<string, A>>, key: string): A | undefined =>
+  Object.hasOwn(record, key) ? record[key] : undefined
+
+const setOwn = <A>(record: Record<string, A>, key: string, value: A): void => {
+  Object.defineProperty(record, key, { value, writable: true, enumerable: true, configurable: true })
+}
+
 /**
  * Applies v2 patch semantics to one field: omitted keeps `previous`, `null`
  * clears to `null`, any other value replaces.
@@ -139,20 +147,18 @@ const capRecord = <A extends { readonly seq: number }>(
   if (keys.length <= limit) return [entries, false]
   const ordered = keys.sort((a, b) => entries[a]!.seq - entries[b]!.seq)
   const kept: Record<string, A> = {}
-  for (const key of ordered.slice(keys.length - limit)) kept[key] = entries[key]!
+  for (const key of ordered.slice(keys.length - limit)) setOwn(kept, key, entries[key]!)
   return [kept, true]
 }
 
 const decodeBase64 = (data: string): ReadonlyArray<number> => {
-  try {
-    const binary = atob(data)
-    const bytes = Array.from({ length: binary.length }, () => 0)
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
-    return bytes
-  } catch {
-    // undecodable chunk contributes no bytes; the raw record keeps it observable.
-    return []
-  }
+  // atob accepted ASCII whitespace and omitted padding. Keep both forms when
+  // switching to Effect's result-based decoder.
+  const stripped = data.replace(/[ \t\n\f\r]/g, "")
+  const padded = stripped.includes("=") ? stripped : stripped.padEnd(stripped.length + (4 - stripped.length % 4) % 4, "=")
+  const decoded = Encoding.decodeBase64(padded)
+  // An undecodable chunk contributes no bytes; the raw record keeps it observable.
+  return Result.isSuccess(decoded) ? Array.from(decoded.success) : []
 }
 
 // -----------------------------------------------------------------------------
@@ -215,7 +221,7 @@ const reduceToolCall = (
   seq: number
 ): SessionSnapshot => {
   const toolCallId = update.toolCallId
-  const previous: ToolCallSnapshot = snapshot.toolCalls[toolCallId] ?? {
+  const previous: ToolCallSnapshot = own(snapshot.toolCalls, toolCallId) ?? {
     toolCallId,
     provenance,
     title: null,
@@ -250,7 +256,7 @@ const reduceToolCallContentChunk = (
   seq: number
 ): SessionSnapshot => {
   const toolCallId = update.toolCallId
-  const previous = snapshot.toolCalls[toolCallId]
+  const previous = own(snapshot.toolCalls, toolCallId)
   const content = update["content"]
   const next: ToolCallSnapshot = previous === undefined
     ? {
@@ -277,7 +283,7 @@ const reduceTerminalUpdate = (
   limits: ContentLimits
 ): SessionSnapshot => {
   const terminalId = update.terminalId
-  const previous: TerminalSnapshot = snapshot.terminals[terminalId] ?? {
+  const previous: TerminalSnapshot = own(snapshot.terminals, terminalId) ?? {
     terminalId,
     command: null,
     cwd: null,
@@ -336,7 +342,7 @@ const reduceTerminalOutputChunk = (
   limits: ContentLimits
 ): SessionSnapshot => {
   const terminalId = update.terminalId
-  const previous = snapshot.terminals[terminalId]
+  const previous = own(snapshot.terminals, terminalId)
   // Each chunk is encoded independently, so it is decoded on its own before
   // being appended: concatenating base64 text first would corrupt the bytes.
   const appended = decodeBase64(update.data)
@@ -380,10 +386,10 @@ const reduceConfigOptions = (
   for (const option of options) {
     if (version === 2 && Schema.is(V2.SessionConfigOption)(option)) {
       const key = option.configId
-      config[key] = { key, option, seq }
+      setOwn(config, key, { key, option, seq })
     } else if (version === 1 && Schema.is(V1.SessionConfigOption)(option)) {
       const key = option.id
-      config[key] = { key, option, seq }
+      setOwn(config, key, { key, option, seq })
     }
   }
   return { ...snapshot, config }
@@ -554,10 +560,13 @@ const reduceV1Update = (
       )
     case "available_commands_update":
       if (!Schema.is(V1.AvailableCommandsUpdate)(update)) return snapshot
-      return { ...snapshot, commands: update.availableCommands.map((command) => ({
-        ...command,
-        input: command.input == null ? command.input : { ...command.input, type: "text" }
-      })) }
+      return { ...snapshot, commands: update.availableCommands.map((command) => {
+        const { input, ...rest } = command
+        return {
+          ...rest,
+          ...(input === undefined ? {} : { input: input === null ? null : { ...input, type: "text" as const } })
+        }
+      }) }
     case "current_mode_update":
       if (!Schema.is(V1.CurrentModeUpdate)(update)) return snapshot
       return {
@@ -604,7 +613,7 @@ const withSubmission = (
   id: string,
   update: (submission: SubmissionSnapshot) => SubmissionSnapshot
 ): SessionSnapshot => {
-  const previous = snapshot.submissions[id]
+  const previous = own(snapshot.submissions, id)
   if (previous === undefined) return snapshot
   return { ...snapshot, submissions: { ...snapshot.submissions, [id]: update(previous) } }
 }
@@ -642,7 +651,7 @@ const applyLimits = (snapshot: SessionSnapshot, limits: ContentLimits): SessionS
     const drop = new Set(settled.slice(0, interactionKeys.length - limits.interactions))
     if (drop.size > 0) {
       const interactions: Record<string, InteractionSnapshot> = {}
-      for (const key of interactionKeys) if (!drop.has(key)) interactions[key] = next.interactions[key]!
+      for (const key of interactionKeys) if (!drop.has(key)) setOwn(interactions, key, next.interactions[key]!)
       next = { ...next, interactions }
       truncated = { ...truncated, interactions: true }
     }
@@ -653,7 +662,7 @@ const applyLimits = (snapshot: SessionSnapshot, limits: ContentLimits): SessionS
   while (Object.keys(submissions).length > (limits.submissions ?? 128) && completed.length) delete submissions[completed.shift()!]
   const [terminals, droppedTerminals] = capRecord(next.terminals, limits.terminals ?? 32)
   next = { ...next, submissions, terminals }
-  next = { ...next, truncated: { ...next.truncated, terminals: next.truncated.terminals.filter((id) => id in terminals) } }
+  next = { ...next, truncated: { ...next.truncated, terminals: next.truncated.terminals.filter((id) => Object.hasOwn(terminals, id)) } }
   if (droppedTerminals) next = { ...next, truncated: { ...next.truncated, content: true } }
   // Bound payload size as well as item counts: one message can contain arbitrarily many chunks.
   const budget = limits.transcriptBytes ?? 4 * 1024 * 1024
@@ -738,7 +747,11 @@ const apply = (
       return {
         ...snapshot,
         submissions: { ...snapshot.submissions, [event.submission.id]: event.submission },
-        activeSubmissionId: event.submission.id
+        activeSubmissionId: event.submission.id,
+        // The previous turn's idle is no longer evidence that this turn has
+        // finished. Reset it before the wire write so a new idle update that
+        // arrives before dispatch or acceptance is still observed.
+        foreground: snapshot.foreground.state === "idle" ? inferredRunning : snapshot.foreground
       }
 
     case "submissionDispatched":
@@ -791,7 +804,7 @@ const apply = (
       }
 
     case "interactionSettled": {
-      const previous = snapshot.interactions[event.interactionId]
+      const previous = own(snapshot.interactions, event.interactionId)
       if (previous === undefined || previous.status !== "pending") return snapshot
       return {
         ...snapshot,

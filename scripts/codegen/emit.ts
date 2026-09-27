@@ -13,10 +13,27 @@ import type { JsonSchemaDocument, Manifest, ManifestInput } from "./inputs.ts"
 import { overrides as defaultOverrides, type Overrides } from "./overrides.ts"
 
 export class UnsupportedSchemaError extends Data.TaggedError("UnsupportedSchemaError")<{ readonly message: string }> {
-  constructor(readonly definition: string, readonly construct: string, detail?: string) {
+  readonly definition: string
+  readonly construct: string
+
+  constructor(definition: string, construct: string, detail?: string) {
     super({ message: `Unsupported JSON Schema construct "${construct}" in definition ${definition}${detail ? `: ${detail}` : ""}` })
+    this.definition = definition
+    this.construct = construct
   }
 }
+
+export class UnknownOverrideError extends Data.TaggedError("UnknownOverrideError")<{
+  readonly definition: string
+  readonly version: number
+  readonly message: string
+}> {
+  constructor(definition: string, version: number) {
+    super({ definition, version, message: `Override for unknown definition ${definition} in v${version}` })
+  }
+}
+
+export type EmitError = UnsupportedSchemaError | UnknownOverrideError
 
 const annotationKeywords = new Set([
   "$schema",
@@ -81,10 +98,20 @@ const str = (u: unknown): string => {
   return encoded.success
 }
 const indent = (s: string, by = "  ") => s.split("\n").join(`\n${by}`)
-const propertyKey = (k: string) => (/^[A-Za-z_$][\w$]*$/.test(k) ? k : str(k))
+const propertyKey = (k: string) => {
+  if (k === "__proto__") return `[${str(k)}]`
+  return /^[A-Za-z_$][\w$]*$/.test(k) ? k : str(k)
+}
+const methodKey = (k: string) => k === "__proto__" ? propertyKey(k) : str(k)
 
 class Emitter {
-  constructor(readonly definitions: Readonly<Record<string, unknown>>, readonly definition: string) {}
+  readonly definitions: Readonly<Record<string, unknown>>
+  readonly definition: string
+
+  constructor(definitions: Readonly<Record<string, unknown>>, definition: string) {
+    this.definitions = definitions
+    this.definition = definition
+  }
 
   fail(construct: string, detail?: string): never {
     throw new UnsupportedSchemaError(this.definition, construct, detail)
@@ -134,7 +161,7 @@ class Emitter {
 
   ref(ref: string): Emitted {
     const match = /^#\/\$defs\/([A-Za-z_][\w]*)$/.exec(ref)
-    if (!match || !(match[1]! in this.definitions)) this.fail("$ref", ref)
+    if (!match || !Object.hasOwn(this.definitions, match[1]!)) this.fail("$ref", ref)
     const name = match[1]!
     const definition = this.definitions[name]
     const unconstrained = isNode(definition) && Object.keys(definition).every((key) => annotationKeywords.has(key) || key.startsWith("x-"))
@@ -227,10 +254,10 @@ class Emitter {
     }
     if (keys.length === 0) return { ts: "{ readonly [key: string]: unknown }", schema: "Wire.object({})" }
     const fields = keys.map((key) => {
-      const value = key in properties ? this.node(properties[key]) : { ts: "unknown", schema: "Schema.Unknown" }
+      const value = Object.hasOwn(properties, key) ? this.node(properties[key]) : { ts: "unknown", schema: "Schema.Unknown" }
       const optional = !required.has(key)
       return {
-        ts: `${docComment(properties[key])}readonly ${propertyKey(key)}${optional ? "?" : ""}: ${value.ts}`,
+        ts: `${docComment(Object.hasOwn(properties, key) ? properties[key] : undefined)}readonly ${propertyKey(key)}${optional ? "?" : ""}: ${value.ts}`,
         schema: `${propertyKey(key)}: ${optional ? `Schema.optionalKey(${value.schema})` : value.schema}`
       }
     })
@@ -276,7 +303,10 @@ const orderDefinitions = (definitions: Readonly<Record<string, unknown>>): Reado
     if (state.get(name) === "done") return
     if (state.get(name) === "visiting") throw new UnsupportedSchemaError(name, "$ref", `recursive reference ${[...path, name].join(" -> ")}`)
     state.set(name, "visiting")
-    for (const dep of [...deps.get(name)!].sort()) visit(dep, [...path, name])
+    for (const dep of [...deps.get(name)!].sort()) {
+      if (!deps.has(dep)) throw new UnsupportedSchemaError(name, "$ref", `unknown definition ${dep}`)
+      visit(dep, [...path, name])
+    }
     state.set(name, "done")
     ordered.push(name)
   }
@@ -293,8 +323,8 @@ interface MethodEntry {
 }
 
 const envelopeRefs = (definitions: Readonly<Record<string, unknown>>, name: string): ReadonlySet<string> => {
+  if (!Object.hasOwn(definitions, name)) throw new UnsupportedSchemaError(name, "$defs", "missing JSON-RPC envelope definition")
   const def = definitions[name]
-  if (def === undefined) throw new UnsupportedSchemaError(name, "$defs", "missing JSON-RPC envelope definition")
   return references(def)
 }
 
@@ -344,13 +374,12 @@ export interface EmitOptions {
   readonly overrides?: Overrides
 }
 
-/** Emits the complete TypeScript module for one pinned schema input. */
-export const emitModule = (document: JsonSchemaDocument, options: EmitOptions): string => {
+const emitModuleUnsafe = (document: JsonSchemaDocument, options: EmitOptions): string => {
   const { input, manifest } = options
   const definitions = document.$defs
   const overrides = (options.overrides ?? defaultOverrides)[input.version] ?? {}
   for (const name of Object.keys(overrides)) {
-    if (!(name in definitions)) throw new Error(`Override for unknown definition ${name} in v${input.version}`)
+    if (!Object.hasOwn(definitions, name)) throw new UnknownOverrideError(name, input.version)
   }
   const out: Array<string> = []
   out.push(
@@ -380,7 +409,7 @@ export const emitModule = (document: JsonSchemaDocument, options: EmitOptions): 
   )
   for (const name of orderDefinitions(definitions)) {
     if (reserved.has(name)) throw new UnsupportedSchemaError(name, "$defs", "definition name collides with a generated export")
-    const override = overrides[name]
+    const override = Object.hasOwn(overrides, name) ? overrides[name] : undefined
     const emitted = override ?? new Emitter(definitions, name).node(definitions[name])
     const doc = docComment(definitions[name])
     out.push(
@@ -398,13 +427,23 @@ export const emitModule = (document: JsonSchemaDocument, options: EmitOptions): 
     out.push(
       entries.map((m) =>
         m.kind === "request"
-          ? `  ${str(m.method)}: AcpSchema.request(${str(m.method)}, ${m.params}, ${m.result})`
-          : `  ${str(m.method)}: AcpSchema.notification(${str(m.method)}, ${m.params})`
+          ? `  ${methodKey(m.method)}: AcpSchema.request(${str(m.method)}, ${m.params}, ${m.result})`
+          : `  ${methodKey(m.method)}: AcpSchema.notification(${str(m.method)}, ${m.params})`
       ).join(",\n"),
       `} as const`
     )
   }
   return out.filter((line, i, all) => !(line === "" && all[i - 1] === "")).join("\n") + "\n"
+}
+
+/** Emits one pinned schema module, returning expected diagnostics as failures. */
+export const emitModule = (document: JsonSchemaDocument, options: EmitOptions): Result.Result<string, EmitError> => {
+  try {
+    return Result.succeed(emitModuleUnsafe(document, options))
+  } catch (error) {
+    if (error instanceof UnsupportedSchemaError || error instanceof UnknownOverrideError) return Result.fail(error)
+    throw error
+  }
 }
 
 /** Collapse primitives that already include literal members; preserve runtime union validation. */

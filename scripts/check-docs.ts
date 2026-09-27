@@ -10,6 +10,9 @@ import * as Schema from "effect/Schema"
 class DocumentationError extends Schema.TaggedError<DocumentationError>()("DocumentationError", {
   message: Schema.String
 }) {}
+class UriDecodeFailure extends Schema.TaggedError<UriDecodeFailure>()("UriDecodeFailure", {
+  cause: Schema.Defect()
+}) {}
 
 const program = Effect.gen(function*() {
   const fs = yield* FileSystem.FileSystem
@@ -55,7 +58,16 @@ const program = Effect.gen(function*() {
       const target = link[1]
       if (target === undefined || /^(?:[a-z]+:|\/\/)/i.test(target)) continue
       const [pathname = "", fragment] = target.split("#")
-      const destination = pathname === "" ? file : path.resolve(path.dirname(file), decodeURI(pathname))
+      const decodedPathname = yield* Effect.try({
+        try: () => decodeURI(pathname),
+        catch: (cause) => new UriDecodeFailure({ cause })
+      }).pipe(Effect.catch((failure) =>
+        failure.cause instanceof URIError ? Effect.succeed(failure.cause) : Effect.die(failure.cause)))
+      if (decodedPathname instanceof URIError) {
+        issues.push(`${label}: invalid link URI ${target}`)
+        continue
+      }
+      const destination = pathname === "" ? file : path.resolve(path.dirname(file), decodedPathname)
       if (!(yield* fs.exists(destination))) {
         issues.push(`${label}: broken link ${target}`)
       } else if (fragment && destination.endsWith(".md")) {

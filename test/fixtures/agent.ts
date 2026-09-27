@@ -8,7 +8,7 @@ import * as Option from "effect/Option"
  * does not import the library, so it checks the library's wire behavior rather
  * than agreeing with it by construction.
  *
- * In-process: `createAgent(options, emit)` returns a line handler.
+ * In-process: `createAgent(options, emit, schedule?)` returns a line handler.
  * Subprocess: `bun test/fixtures/agent.ts <version> <mode>` speaks stdio.
  *   mode "normal"      answer as described below
  *   mode "unsupported" answer initialize with protocolVersion 99
@@ -40,7 +40,11 @@ const SessionParams = Schema.Struct({ sessionId: Schema.String })
 const PermissionResult = Schema.Struct({ outcome: Schema.optionalKey(Schema.Struct({ optionId: Schema.optionalKey(Schema.String) })) })
 
 
-export const createAgent = (options: AgentOptions, emit: (line: string) => void) => {
+export const createAgent = (
+  options: AgentOptions,
+  emit: (line: string) => void,
+  schedule: (effect: Effect.Effect<void, Schema.SchemaError>) => void = (effect) => { void Effect.runFork(effect) }
+) => {
   const { version } = options
   const received: Array<string> = []
   const waiting = new Map<RequestId | undefined, Deferred.Deferred<Message>>()
@@ -148,7 +152,7 @@ export const createAgent = (options: AgentOptions, emit: (line: string) => void)
 
   return (line: string) => {
     received.push(line)
-    Effect.runFork(Effect.gen(function*() {
+    schedule(Effect.gen(function*() {
       const value = yield* Schema.decodeEffect(Frame)(line)
       // A batch reply is routed as one message keyed by its first request id.
       if (Array.isArray(value)) {
