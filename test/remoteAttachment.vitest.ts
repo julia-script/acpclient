@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test"
+import { expect, it } from "@effect/vitest"
 import * as Cause from "effect/Cause"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
@@ -12,13 +12,13 @@ import * as Remote from "../src/AcpRemoteClient.ts"
 import { apiFor, hostedHarness } from "./support/host.ts"
 
 const run = <A, E>(effect: Effect.Effect<A, E, Scope.Scope>) =>
-  Effect.runPromise(Effect.scoped(effect).pipe(Effect.timeout("3 seconds")))
+  Effect.scoped(effect).pipe(Effect.timeout("3 seconds"))
 
 const code = (exit: Exit.Exit<unknown, unknown>) => Exit.isSuccess(exit)
   ? "success"
   : (Cause.squash(exit.cause) as AcpGateway.GatewayError).code
 
-test("concurrent callers share one attachment until both scopes close", () => run(Effect.gen(function*() {
+it.live("concurrent callers share one attachment until both scopes close", () => run(Effect.gen(function*() {
   let attached = 0
   let detached = 0
   const h = yield* hostedHarness(2, { onLifecycle: (event) => Effect.sync(() => {
@@ -68,7 +68,7 @@ test("concurrent callers share one attachment until both scopes close", () => ru
   expect(remote.descriptor(second)).toBeUndefined()
 })))
 
-test("explicit release drops only its caller reference", () => run(Effect.gen(function*() {
+it.live("explicit release drops only its caller reference", () => run(Effect.gen(function*() {
   const h = yield* hostedHarness(2)
   const original = yield* h.connection.newSession({ cwd: "/work" })
   const descriptor = h.remote.descriptor(original)!
@@ -93,7 +93,7 @@ test("explicit release drops only its caller reference", () => run(Effect.gen(fu
   yield* Scope.close(secondScope, Exit.void)
 })))
 
-test("interrupting an in-flight caller leaves a fresh attachment available", () => run(Effect.gen(function*() {
+it.live("interrupting an in-flight caller leaves a fresh attachment available", () => run(Effect.gen(function*() {
   const h = yield* hostedHarness(2)
   const original = yield* h.connection.newSession({ cwd: "/work" })
   const descriptor = h.remote.descriptor(original)!
@@ -122,7 +122,7 @@ test("interrupting an in-flight caller leaves a fresh attachment available", () 
   yield* Scope.close(secondScope, Exit.void)
 })))
 
-test("failed acquisition can retry and takeover still reaches the host", () => run(Effect.gen(function*() {
+it.live("failed acquisition can retry and takeover still reaches the host", () => run(Effect.gen(function*() {
   const h = yield* hostedHarness(2)
   const original = yield* h.connection.newSession({ cwd: "/work" })
   const descriptor = h.remote.descriptor(original)!
@@ -144,7 +144,7 @@ test("failed acquisition can retry and takeover still reaches the host", () => r
   yield* Scope.close(scope, Exit.void)
 })))
 
-test("a failed first snapshot save releases the controller before retry", () => run(Effect.gen(function*() {
+it.live("a failed first snapshot save releases the controller before retry", () => run(Effect.gen(function*() {
   let detached = 0
   const h = yield* hostedHarness(2, { onLifecycle: (event) => Effect.sync(() => {
     if (event.type === "detached") detached++
@@ -174,7 +174,7 @@ test("a failed first snapshot save releases the controller before retry", () => 
   yield* replacement.release
 })))
 
-test("a stale descriptor is rejected and does not poison a later attachment", () => run(Effect.gen(function*() {
+it.live("a stale descriptor is rejected and does not poison a later attachment", () => run(Effect.gen(function*() {
   const h = yield* hostedHarness(2)
   const original = yield* h.connection.newSession({ cwd: "/work" })
   const descriptor = h.remote.descriptor(original)!
@@ -185,7 +185,7 @@ test("a stale descriptor is rejected and does not poison a later attachment", ()
   yield* replacement.release
 })))
 
-test("a stale descriptor cannot take over a live controller", () => run(Effect.gen(function*() {
+it.live("a stale descriptor cannot take over a live controller", () => run(Effect.gen(function*() {
   const h = yield* hostedHarness(2)
   const original = yield* h.connection.newSession({ cwd: "/work" })
   const descriptor = h.remote.descriptor(original)!
@@ -195,7 +195,7 @@ test("a stale descriptor cannot take over a live controller", () => run(Effect.g
   yield* original.release
 })))
 
-test("live metadata still blocks stale takeover when retained storage is unavailable", () => run(Effect.gen(function*() {
+it.live("live metadata still blocks stale takeover when retained storage is unavailable", () => run(Effect.gen(function*() {
   const h = yield* hostedHarness(2)
   const original = yield* h.connection.newSession({ cwd: "/work" })
   const descriptor = h.remote.descriptor(original)!
@@ -217,7 +217,7 @@ test("live metadata still blocks stale takeover when retained storage is unavail
   yield* active.release
 })))
 
-test("an in-flight attachment blocks a stale takeover before its first save", () => run(Effect.gen(function*() {
+it.live("an in-flight attachment blocks a stale takeover before its first save", () => run(Effect.gen(function*() {
   const h = yield* hostedHarness(2)
   const original = yield* h.connection.newSession({ cwd: "/work" })
   const descriptor = h.remote.descriptor(original)!
@@ -248,7 +248,7 @@ test("an in-flight attachment blocks a stale takeover before its first save", ()
   yield* active.release
 })))
 
-test("an explicit takeover replaces an active local attachment", () => run(Effect.gen(function*() {
+it.live("an explicit takeover replaces an active local attachment", () => run(Effect.gen(function*() {
   const h = yield* hostedHarness(2)
   const original = yield* h.connection.newSession({ cwd: "/work" })
   const descriptor = h.remote.descriptor(original)!

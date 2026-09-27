@@ -3,7 +3,7 @@
  * submission lifecycles, and retention bounds. No transport is involved, so
  * these pin the interpretation rules on their own.
  */
-import { describe, expect, test } from "bun:test"
+import { describe, expect, it } from "@effect/vitest"
 import { defaultContentLimits, type SubmissionSnapshot } from "../src/AcpApp.ts"
 import * as State from "../src/AcpSessionState.ts"
 
@@ -25,7 +25,7 @@ const submission = (id: string, overrides: Partial<SubmissionSnapshot> = {}): Su
 })
 
 describe("v2 messages", () => {
-  test("chunks append in order under one message id", () => {
+  it("chunks append in order under one message id", () => {
     const next = State.reduceAll(v2(), [
       update({ sessionUpdate: "agent_message_chunk", messageId: "m-1", content: text("a") }),
       update({ sessionUpdate: "agent_message_chunk", messageId: "m-1", content: text("b") })
@@ -36,7 +36,7 @@ describe("v2 messages", () => {
   })
 
   // Spec: "Replace accumulated chunks".
-  test("a whole-message update replaces prior chunks, then later chunks append", () => {
+  it("a whole-message update replaces prior chunks, then later chunks append", () => {
     const next = State.reduceAll(v2(), [
       update({ sessionUpdate: "agent_message_chunk", messageId: "m-1", content: text("draft") }),
       update({ sessionUpdate: "agent_message", messageId: "m-1", content: [text("final")] }),
@@ -46,7 +46,7 @@ describe("v2 messages", () => {
     expect(next.messages[0]!.content).toEqual([text("final"), text("!")])
   })
 
-  test("an explicit null content clears the message", () => {
+  it("an explicit null content clears the message", () => {
     const next = State.reduceAll(v2(), [
       update({ sessionUpdate: "agent_message_chunk", messageId: "m-1", content: text("a") }),
       update({ sessionUpdate: "agent_message", messageId: "m-1", content: null })
@@ -54,7 +54,7 @@ describe("v2 messages", () => {
     expect(next.messages[0]!.content).toEqual([])
   })
 
-  test("distinct message ids are distinct messages", () => {
+  it("distinct message ids are distinct messages", () => {
     const next = State.reduceAll(v2(), [
       update({ sessionUpdate: "agent_message_chunk", messageId: "m-1", content: text("a") }),
       update({ sessionUpdate: "agent_message_chunk", messageId: "m-2", content: text("b") })
@@ -62,7 +62,7 @@ describe("v2 messages", () => {
     expect(next.messages.map((message) => message.id)).toEqual(["m-1", "m-2"])
   })
 
-  test("user, agent, and thought messages keep their kinds", () => {
+  it("user, agent, and thought messages keep their kinds", () => {
     const next = State.reduceAll(v2(), [
       update({ sessionUpdate: "user_message", messageId: "u-1", content: [text("q")] }),
       update({ sessionUpdate: "agent_message", messageId: "a-1", content: [text("r")] }),
@@ -73,7 +73,7 @@ describe("v2 messages", () => {
 })
 
 describe("v2 tool calls", () => {
-  test("prototype-named tool calls start fresh and retain their chunks", () => {
+  it("prototype-named tool calls start fresh and retain their chunks", () => {
     for (const id of ["constructor", "toString", "__proto__"]) {
       const next = State.reduceAll(v2(), [
         update({ sessionUpdate: "tool_call_update", toolCallId: id, title: "Run" }),
@@ -85,7 +85,7 @@ describe("v2 tool calls", () => {
     }
   })
 
-  test("omitted fields are unchanged, null clears, values replace", () => {
+  it("omitted fields are unchanged, null clears, values replace", () => {
     const seeded = State.reduce(
       v2(),
       update({
@@ -109,7 +109,7 @@ describe("v2 tool calls", () => {
     expect(call.rawInput).toEqual({ path: "a.ts" })
   })
 
-  test("content chunks append to the tool call", () => {
+  it("content chunks append to the tool call", () => {
     const next = State.reduceAll(v2(), [
       update({ sessionUpdate: "tool_call_update", toolCallId: "t-1", title: "Run" }),
       update({ sessionUpdate: "tool_call_content_chunk", toolCallId: "t-1", content: { type: "content", content: text("1") } }),
@@ -118,7 +118,7 @@ describe("v2 tool calls", () => {
     expect(next.toolCalls["t-1"]!.content).toHaveLength(2)
   })
 
-  test("a full content update replaces accumulated chunks", () => {
+  it("a full content update replaces accumulated chunks", () => {
     const next = State.reduceAll(v2(), [
       update({ sessionUpdate: "tool_call_content_chunk", toolCallId: "t-1", content: { type: "content", content: text("1") } }),
       update({ sessionUpdate: "tool_call_update", toolCallId: "t-1", content: [{ type: "content", content: text("final") }] })
@@ -130,7 +130,7 @@ describe("v2 tool calls", () => {
 describe("v2 terminals", () => {
   const base64 = (value: string) => btoa(value)
 
-  test("prototype-named terminals keep decoded output", () => {
+  it("prototype-named terminals keep decoded output", () => {
     for (const id of ["constructor", "toString", "__proto__"]) {
       const next = State.reduceAll(v2(), [
         update({ sessionUpdate: "terminal_update", terminalId: id, output: { data: base64("A") } }),
@@ -142,7 +142,7 @@ describe("v2 terminals", () => {
     }
   })
 
-  test("base64 keeps accepted unpadded and whitespace forms and ignores invalid chunks", () => {
+  it("base64 keeps accepted unpadded and whitespace forms and ignores invalid chunks", () => {
     const next = State.reduceAll(v2(), [
       update({ sessionUpdate: "terminal_update", terminalId: "term-1", output: { data: " Y Q = = " } }),
       update({ sessionUpdate: "terminal_output_chunk", terminalId: "term-1", data: "Yg" }),
@@ -154,7 +154,7 @@ describe("v2 terminals", () => {
   })
 
   // Spec: "Terminal snapshot and byte chunks".
-  test("a replacement snapshot replaces output, then chunks append decoded bytes", () => {
+  it("a replacement snapshot replaces output, then chunks append decoded bytes", () => {
     const next = State.reduceAll(v2(), [
       update({ sessionUpdate: "terminal_output_chunk", terminalId: "term-1", data: base64("stale") }),
       update({ sessionUpdate: "terminal_update", terminalId: "term-1", command: "ls", output: { data: base64("A") } }),
@@ -166,7 +166,7 @@ describe("v2 terminals", () => {
     expect(terminal.command).toBe("ls")
   })
 
-  test("each chunk is decoded independently, not as concatenated base64", () => {
+  it("each chunk is decoded independently, not as concatenated base64", () => {
     // "a" and "b" each encode to 4 base64 chars with padding; concatenating
     // the text before decoding would produce garbage rather than "ab".
     const next = State.reduceAll(v2(), [
@@ -176,7 +176,7 @@ describe("v2 terminals", () => {
     expect(String.fromCharCode(...next.terminals["term-1"]!.outputBytes)).toBe("ab")
   })
 
-  test("exit status marks the terminal exited", () => {
+  it("exit status marks the terminal exited", () => {
     const next = State.reduce(
       v2(),
       update({ sessionUpdate: "terminal_update", terminalId: "term-1", exitStatus: { exitCode: 3, signal: null } })
@@ -185,7 +185,7 @@ describe("v2 terminals", () => {
   })
 
   // Spec: "Transcript exceeds retained-content budget".
-  test("output beyond the byte budget is truncated and reported", () => {
+  it("output beyond the byte budget is truncated and reported", () => {
     const limits = { ...defaultContentLimits, terminalBytes: 4 }
     const next = State.reduceAll(
       v2(),
@@ -204,7 +204,7 @@ describe("v2 terminals", () => {
 })
 
 describe("v2 plans, commands, config, usage, info", () => {
-  test("a plan update replaces its entries by plan id", () => {
+  it("a plan update replaces its entries by plan id", () => {
     const next = State.reduceAll(v2(), [
       update({ sessionUpdate: "plan_update", plan: { type: "items", planId: "p-1", entries: [{ content: "one", priority: "high", status: "pending" }] } }),
       update({ sessionUpdate: "plan_update", plan: { type: "items", planId: "p-1", entries: [{ content: "two", priority: "low", status: "completed" }] } })
@@ -212,7 +212,7 @@ describe("v2 plans, commands, config, usage, info", () => {
     expect(next.plans["p-1"]!.entries).toEqual([{ content: "two", priority: "low", status: "completed" }])
   })
 
-  test("an unknown plan variant stays observable without inventing entries", () => {
+  it("an unknown plan variant stays observable without inventing entries", () => {
     const next = State.reduce(
       v2(),
       update({ sessionUpdate: "plan_update", plan: { type: "_custom", planId: "p-9" } })
@@ -221,7 +221,7 @@ describe("v2 plans, commands, config, usage, info", () => {
     expect(next.plans["p-9"]!.variant).toEqual({ type: "_custom", planId: "p-9" })
   })
 
-  test("available commands are replaced wholesale", () => {
+  it("available commands are replaced wholesale", () => {
     const next = State.reduceAll(v2(), [
       update({ sessionUpdate: "available_commands_update", availableCommands: [{ name: "a", description: "" }] }),
       update({ sessionUpdate: "available_commands_update", availableCommands: [{ name: "b", description: "" }] })
@@ -229,7 +229,7 @@ describe("v2 plans, commands, config, usage, info", () => {
     expect(next.commands.map((command) => command.name)).toEqual(["b"])
   })
 
-  test("v2 config options key on configId and replace the whole set", () => {
+  it("v2 config options key on configId and replace the whole set", () => {
     const next = State.reduceAll(v2(), [
       update({ sessionUpdate: "config_option_update", configOptions: [{ configId: "model", name: "Model", type: "select", currentValue: "a", options: [{ value: "a", name: "A" }] }] }),
       update({ sessionUpdate: "config_option_update", configOptions: [{ configId: "depth", name: "Depth", type: "boolean", currentValue: false }] })
@@ -237,7 +237,7 @@ describe("v2 plans, commands, config, usage, info", () => {
     expect(Object.keys(next.config)).toEqual(["depth"])
   })
 
-  test("prototype-named config options are own entries", () => {
+  it("prototype-named config options are own entries", () => {
     for (const id of ["constructor", "toString", "__proto__"]) {
       const next = State.reduce(v2(), update({ sessionUpdate: "config_option_update", configOptions: [
         { configId: id, name: "Mode", type: "boolean", currentValue: false }
@@ -248,7 +248,7 @@ describe("v2 plans, commands, config, usage, info", () => {
     }
   })
 
-  test("usage and session info are projected", () => {
+  it("usage and session info are projected", () => {
     const next = State.reduceAll(v2(), [
       update({ sessionUpdate: "usage_update", used: 10, size: 100, cost: { amount: 1, currency: "USD" } }),
       update({ sessionUpdate: "session_info_update", title: "Fix bug", updatedAt: "2026-01-01T00:00:00Z" })
@@ -257,7 +257,7 @@ describe("v2 plans, commands, config, usage, info", () => {
     expect(next.metadata.title).toBe("Fix bug")
   })
 
-  test("session info null clears the title but omission keeps it", () => {
+  it("session info null clears the title but omission keeps it", () => {
     const next = State.reduceAll(v2(), [
       update({ sessionUpdate: "session_info_update", title: "Set" }),
       update({ sessionUpdate: "session_info_update", updatedAt: "later" }),
@@ -269,7 +269,7 @@ describe("v2 plans, commands, config, usage, info", () => {
 })
 
 describe("raw updates and unknown variants", () => {
-  test("malformed known updates stay raw without creating projected records", () => {
+  it("malformed known updates stay raw without creating projected records", () => {
     const next = State.reduceAll(v2(), [
       update({ sessionUpdate: "terminal_update", command: "missing terminal id" }),
       update({ sessionUpdate: "tool_call_update", toolCallId: 12, title: "invalid id" }),
@@ -283,7 +283,7 @@ describe("raw updates and unknown variants", () => {
     expect(next.usage).toBeNull()
   })
 
-  test("every update is retained raw, including undecodable ones", () => {
+  it("every update is retained raw, including undecodable ones", () => {
     const next = State.reduceAll(v2(), [
       update({ sessionUpdate: "agent_message_chunk", messageId: "m-1", content: text("a") }),
       update({ sessionUpdate: "_vendor/extension", anything: true }),
@@ -297,7 +297,7 @@ describe("raw updates and unknown variants", () => {
     expect(next.raw.every((record) => record.version === 2)).toBe(true)
   })
 
-  test("an unknown variant does not corrupt known state", () => {
+  it("an unknown variant does not corrupt known state", () => {
     const next = State.reduceAll(v2(), [
       update({ sessionUpdate: "agent_message", messageId: "m-1", content: [text("kept")] }),
       update({ sessionUpdate: "future_variant", messageId: "m-1", content: [] })
@@ -307,7 +307,7 @@ describe("raw updates and unknown variants", () => {
 })
 
 describe("v1 adaptation", () => {
-  test("command input hints are adapted to the v2 text-input variant", () => {
+  it("command input hints are adapted to the v2 text-input variant", () => {
     const next = State.reduce(v1(), update({
       sessionUpdate: "available_commands_update",
       availableCommands: [{ name: "search", description: "Search files", input: { hint: "pattern" } }]
@@ -318,7 +318,7 @@ describe("v1 adaptation", () => {
   })
 
   // Spec: "Missing message ID during replay".
-  test("chunks without message ids get local identities, never agent ones", () => {
+  it("chunks without message ids get local identities, never agent ones", () => {
     const next = State.reduceAll(v1(), [
       update({ sessionUpdate: "agent_message_chunk", content: text("a") }),
       update({ sessionUpdate: "agent_message_chunk", content: text("b") })
@@ -328,7 +328,7 @@ describe("v1 adaptation", () => {
     expect(next.messages[0]!.content).toEqual([text("a"), text("b")])
   })
 
-  test("a role change starts a new local message rather than merging by content", () => {
+  it("a role change starts a new local message rather than merging by content", () => {
     const next = State.reduceAll(v1(), [
       update({ sessionUpdate: "agent_message_chunk", content: text("same") }),
       update({ sessionUpdate: "user_message_chunk", content: text("same") }),
@@ -340,7 +340,7 @@ describe("v1 adaptation", () => {
     expect(new Set(next.messages.map((message) => message.id)).size).toBe(3)
   })
 
-  test("tool_call introduces and tool_call_update merges, keeping agent tool ids", () => {
+  it("tool_call introduces and tool_call_update merges, keeping agent tool ids", () => {
     const next = State.reduceAll(v1(), [
       update({ sessionUpdate: "tool_call", toolCallId: "t-1", title: "Edit", status: "pending" }),
       update({ sessionUpdate: "tool_call_update", toolCallId: "t-1", status: "completed" })
@@ -351,7 +351,7 @@ describe("v1 adaptation", () => {
     expect(call.provenance).toEqual({ _tag: "agent", agentId: "t-1" })
   })
 
-  test("v1 has a single implicit plan, marked local", () => {
+  it("v1 has a single implicit plan, marked local", () => {
     const next = State.reduceAll(v1(), [
       update({ sessionUpdate: "plan", entries: [{ content: "one", priority: "high", status: "pending" }] }),
       update({ sessionUpdate: "plan", entries: [{ content: "two", priority: "low", status: "completed" }] })
@@ -361,7 +361,7 @@ describe("v1 adaptation", () => {
     expect(next.plans["local-plan"]!.entries).toHaveLength(1)
   })
 
-  test("v1 config options key on id and modes surface under a reserved key", () => {
+  it("v1 config options key on id and modes surface under a reserved key", () => {
     const next = State.reduceAll(v1(), [
       update({ sessionUpdate: "config_option_update", configOptions: [{ id: "model", name: "Model", type: "select", currentValue: "a", options: [{ value: "a", name: "A" }] }] }),
       update({ sessionUpdate: "current_mode_update", currentModeId: "architect" })
@@ -370,14 +370,14 @@ describe("v1 adaptation", () => {
     expect(next.config["acp/currentMode"]!.option).toMatchObject({ currentModeId: "architect" })
   })
 
-  test("raw records carry the v1 version", () => {
+  it("raw records carry the v1 version", () => {
     const next = State.reduce(v1(), update({ sessionUpdate: "plan", entries: [] }))
     expect(next.raw[0]!.version).toBe(1)
   })
 })
 
 describe("submissions", () => {
-  test("prototype-named submission IDs update only registered entries", () => {
+  it("prototype-named submission IDs update only registered entries", () => {
     for (const id of ["constructor", "toString", "__proto__"]) {
       const missing = State.reduce(v2(), { _tag: "submissionDispatched", id, requestId: 7 })
       expect(Object.hasOwn(missing.submissions, id)).toBe(false)
@@ -389,7 +389,7 @@ describe("submissions", () => {
       expect(Object.getPrototypeOf(next.submissions)).toBe(Object.prototype)
     }
   })
-  test("v2 acceptance records the agent message id without completing foreground", () => {
+  it("v2 acceptance records the agent message id without completing foreground", () => {
     const next = State.reduceAll(v2(), [
       { _tag: "submissionRegistered", submission: submission("s-1") },
       { _tag: "submissionDispatched", id: "s-1", requestId: 7 },
@@ -402,7 +402,7 @@ describe("submissions", () => {
   })
 
   // Spec: "User update precedes acknowledgement".
-  test("a user update before the response does not duplicate on acceptance", () => {
+  it("a user update before the response does not duplicate on acceptance", () => {
     const next = State.reduceAll(v2(), [
       { _tag: "submissionRegistered", submission: submission("s-1") },
       { _tag: "submissionDispatched", id: "s-1", requestId: 1 },
@@ -414,7 +414,7 @@ describe("submissions", () => {
     expect(next.activeSubmissionId).toBe("s-1")
   })
 
-  test("v2 foreground ends on the idle state update, not on acceptance", () => {
+  it("v2 foreground ends on the idle state update, not on acceptance", () => {
     const next = State.reduceAll(v2(), [
       { _tag: "submissionRegistered", submission: submission("s-1") },
       { _tag: "submissionDispatched", id: "s-1", requestId: 1 },
@@ -425,7 +425,7 @@ describe("submissions", () => {
     expect(next.foreground).toEqual({ state: "idle", stopReason: "end_turn" })
   })
 
-  test("a new turn replaces inherited idle but keeps an idle update before dispatch", () => {
+  it("a new turn replaces inherited idle but keeps an idle update before dispatch", () => {
     const previousIdle = State.reduce(v2(), update({ sessionUpdate: "state_update", state: "idle", stopReason: "end_turn" }))
     const registered = State.reduce(previousIdle, { _tag: "submissionRegistered", submission: submission("s-2") })
     expect(registered.foreground).toEqual({ state: "running", provenance: "inferred" })
@@ -436,7 +436,7 @@ describe("submissions", () => {
     expect(dispatched.activeSubmissionId).toBeNull()
   })
 
-  test("dispatch preserves an agent-reported foreground state", () => {
+  it("dispatch preserves an agent-reported foreground state", () => {
     const next = State.reduceAll(v2(), [
       { _tag: "submissionRegistered", submission: submission("s-1") },
       update({ sessionUpdate: "state_update", state: "queued" }),
@@ -445,7 +445,7 @@ describe("submissions", () => {
     expect(next.foreground).toEqual({ state: "queued", provenance: "agent-reported" })
   })
 
-  test("agent-reported running is distinguishable from inferred running", () => {
+  it("agent-reported running is distinguishable from inferred running", () => {
     // v1 has no `state_update` variant at all, so a running v1 session is
     // only ever locally inferred from an outstanding prompt.
     const inferred = State.reduceAll(v1(), [
@@ -462,7 +462,7 @@ describe("submissions", () => {
     expect(reported.foreground).toEqual({ state: "running", provenance: "agent-reported" })
   })
 
-  test("a v1 state_update is not interpreted, since v1 has no such variant", () => {
+  it("a v1 state_update is not interpreted, since v1 has no such variant", () => {
     const next = State.reduce(v1(), update({ sessionUpdate: "state_update", state: "idle" }))
     expect(next.foreground).toEqual({ state: "unknown" })
     // It stays visible as a raw record rather than being silently discarded.
@@ -470,7 +470,7 @@ describe("submissions", () => {
   })
 
   // Spec: "V1 prompt remains pending".
-  test("v1 completion comes from the prompt response and reports its stop reason", () => {
+  it("v1 completion comes from the prompt response and reports its stop reason", () => {
     const next = State.reduceAll(v1(), [
       { _tag: "submissionRegistered", submission: submission("s-1", { acceptanceUnavailable: true }) },
       { _tag: "submissionDispatched", id: "s-1", requestId: 1 },
@@ -482,7 +482,7 @@ describe("submissions", () => {
     expect(next.activeSubmissionId).toBeNull()
   })
 
-  test("a failed submission releases the foreground and records why", () => {
+  it("a failed submission releases the foreground and records why", () => {
     const next = State.reduceAll(v2(), [
       { _tag: "submissionRegistered", submission: submission("s-1") },
       { _tag: "submissionFailed", id: "s-1", failure: { _tag: "timeout" } }
@@ -491,7 +491,7 @@ describe("submissions", () => {
     expect(next.activeSubmissionId).toBeNull()
   })
 
-  test("an unknown agent state is preserved verbatim as agent-reported", () => {
+  it("an unknown agent state is preserved verbatim as agent-reported", () => {
     const next = State.reduce(v2(), update({ sessionUpdate: "state_update", state: "_vendor_waiting" }))
     expect(next.foreground).toEqual({ state: "_vendor_waiting", provenance: "agent-reported" })
   })
@@ -509,7 +509,7 @@ describe("interactions", () => {
     resolvedAt: null
   }
 
-  test("prototype-named interactions settle only after they are created", () => {
+  it("prototype-named interactions settle only after they are created", () => {
     for (const id of ["constructor", "toString", "__proto__"]) {
       const missing = State.reduce(v2(), { _tag: "interactionSettled", interactionId: id, status: "resolved", outcome: { outcome: { outcome: "cancelled" } } })
       expect(Object.hasOwn(missing.interactions, id)).toBe(false)
@@ -523,7 +523,7 @@ describe("interactions", () => {
     }
   })
 
-  test("settling records the outcome and resolution point", () => {
+  it("settling records the outcome and resolution point", () => {
     const next = State.reduceAll(v2(), [
       { _tag: "interactionCreated", interaction: pending },
       { _tag: "interactionSettled", interactionId: "permission-0", status: "resolved", outcome: { outcome: { outcome: "selected", optionId: "allow" } } }
@@ -535,7 +535,7 @@ describe("interactions", () => {
   })
 
   // Spec: "Duplicate interaction response" — the reducer half of it.
-  test("a second settle does not overwrite the first", () => {
+  it("a second settle does not overwrite the first", () => {
     const next = State.reduceAll(v2(), [
       { _tag: "interactionCreated", interaction: pending },
       { _tag: "interactionSettled", interactionId: "permission-0", status: "resolved", outcome: { outcome: { outcome: "selected", optionId: "allow" } } },
@@ -548,7 +548,7 @@ describe("interactions", () => {
 
 describe("cancellation", () => {
   // Spec: "Updates after cancel".
-  test("updates after a cancel request are applied and do not confirm cancellation", () => {
+  it("updates after a cancel request are applied and do not confirm cancellation", () => {
     const next = State.reduceAll(v2(), [
       { _tag: "submissionRegistered", submission: submission("s-1") },
       { _tag: "submissionDispatched", id: "s-1", requestId: 1 },
@@ -565,7 +565,7 @@ describe("cancellation", () => {
 })
 
 describe("retention bounds", () => {
-  test("record caps retain a prototype-named newest key as data", () => {
+  it("record caps retain a prototype-named newest key as data", () => {
     const next = State.reduceAll(v2(), [
       update({ sessionUpdate: "tool_call_update", toolCallId: "old" }),
       update({ sessionUpdate: "tool_call_update", toolCallId: "__proto__" }),
@@ -578,7 +578,7 @@ describe("retention bounds", () => {
     }
   })
 
-  test("interaction cap retains a prototype-named pending key as data", () => {
+  it("interaction cap retains a prototype-named pending key as data", () => {
     const interaction = (interactionId: string) => ({
       interactionId, kind: "permission" as const, version: 2 as const, status: "pending" as const,
       request: { sessionId: "s", title: "Edit", options: [] }, outcome: null, createdAt: 1, resolvedAt: null
@@ -591,7 +591,7 @@ describe("retention bounds", () => {
     expect(Object.keys(next.interactions)).toEqual(["__proto__"])
     expect(Object.getPrototypeOf(next.interactions)).toBe(Object.prototype)
   })
-  test("messages beyond the budget are evicted oldest-first and reported", () => {
+  it("messages beyond the budget are evicted oldest-first and reported", () => {
     const limits = { ...defaultContentLimits, messages: 3 }
     const next = State.reduceAll(
       v2(),
@@ -603,7 +603,7 @@ describe("retention bounds", () => {
     expect(next.truncated.history).toBe(true)
   })
 
-  test("tool calls, plans, and raw records are each bounded independently", () => {
+  it("tool calls, plans, and raw records are each bounded independently", () => {
     const limits = { ...defaultContentLimits, toolCalls: 2, plans: 1, rawUpdates: 3 }
     const next = State.reduceAll(
       v2(),
@@ -620,7 +620,7 @@ describe("retention bounds", () => {
     expect(next.truncated).toMatchObject({ toolCalls: true, plans: true, raw: true })
   })
 
-  test("pending interactions are never evicted by the interaction budget", () => {
+  it("pending interactions are never evicted by the interaction budget", () => {
     const limits = { ...defaultContentLimits, interactions: 1 }
     const next = State.reduceAll(
       v2(),
@@ -660,7 +660,7 @@ describe("retention bounds", () => {
     expect(next.truncated.interactions).toBe(true)
   })
 
-  test("seq advances once per applied event", () => {
+  it("seq advances once per applied event", () => {
     const next = State.reduceAll(v2(), [
       update({ sessionUpdate: "state_update", state: "running" }),
       update({ sessionUpdate: "state_update", state: "idle" })
@@ -670,7 +670,7 @@ describe("retention bounds", () => {
 })
 
 describe("lifecycle events", () => {
-  test("config options and v1 modes from a lifecycle response are projected", () => {
+  it("config options and v1 modes from a lifecycle response are projected", () => {
     const next = State.reduce(v1(), {
       _tag: "lifecycle",
       cwd: "/work",
@@ -683,7 +683,7 @@ describe("lifecycle events", () => {
   })
 })
 
-test("omitted message content keeps prior content while null clears it", () => {
+it("omitted message content keeps prior content while null clears it", () => {
   const state = State.reduceAll(v2(), [
     update({ sessionUpdate: "agent_message_chunk", messageId: "m", content: text("keep") }),
     update({ sessionUpdate: "agent_message", messageId: "m" })
@@ -692,7 +692,7 @@ test("omitted message content keeps prior content while null clears it", () => {
   expect(State.reduce(state, update({ sessionUpdate: "agent_message", messageId: "m", content: null })).messages[0]!.content).toEqual([])
 })
 
-test("one huge transcript entry and unlimited chunks cannot bypass the byte budget", () => {
+it("one huge transcript entry and unlimited chunks cannot bypass the byte budget", () => {
   let state = v2()
   const limits = { ...defaultContentLimits, transcriptBytes: 2048 }
   for (let i = 0; i < 30; i++) state = State.reduce(state, update({ sessionUpdate: "agent_message_chunk", messageId: "m", content: text("x".repeat(3000)) }), limits)
@@ -700,7 +700,7 @@ test("one huge transcript entry and unlimited chunks cannot bypass the byte budg
   expect(new TextEncoder().encode(JSON.stringify(state)).byteLength).toBeLessThanOrEqual(2048)
 })
 
-test("v1 replay respects optional agent message IDs", () => {
+it("v1 replay respects optional agent message IDs", () => {
   const next = State.reduceAll(v1(), [
     update({ sessionUpdate: "agent_message_chunk", messageId: "first", content: text("a") }),
     update({ sessionUpdate: "agent_message_chunk", messageId: "first", content: text("b") }),

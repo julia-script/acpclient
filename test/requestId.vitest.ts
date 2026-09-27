@@ -1,11 +1,11 @@
-import { expect, test } from "bun:test"
+import { expect, it } from "@effect/vitest"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import { SubmissionSnapshot } from "../src/AcpApp.ts"
 import { AcpTimeoutError } from "../src/AcpError.ts"
 import { RequestId } from "../src/AcpSchema.ts"
 
-test("request ID codecs agree at snapshot and timeout boundaries", () => {
+it("request ID codecs agree at snapshot and timeout boundaries", () => {
   const submission = {
     id: "submission-1", prompt: [], status: { _tag: "pending" },
     requestId: 1.25, agentMessageId: null, acceptanceUnavailable: false, foreground: "inferred"

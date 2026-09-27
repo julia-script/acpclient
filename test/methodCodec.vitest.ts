@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, it } from "@effect/vitest"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
@@ -15,7 +15,7 @@ const Convert = AcpSchema.request("test/convert", Params, Schema.FiniteFromStrin
 const Notice = AcpSchema.notification("test/notice", Params)
 
 describe("transforming method codecs", () => {
-  test("outgoing calls encode params and decode results", () => Effect.runPromise(Effect.scoped(Effect.gen(function*() {
+  it.effect("outgoing calls encode params and decode results", () => Effect.scoped(Effect.gen(function*() {
     const pair = yield* InMemory.make({ capacity: 8 })
     const connection = yield* AcpConnection.make().pipe(Effect.provideService(AcpTransport, yield* pair.left))
     const peer = yield* pair.right.pipe(Effect.flatMap(driver))
@@ -28,9 +28,9 @@ describe("transforming method codecs", () => {
 
     yield* connection.notify(Notice, { value: 8 })
     expect(yield* peer.next).toMatchObject({ jsonrpc: "2.0", method: "test/notice", params: { value: "8" } })
-  }))))
+  })))
 
-  test("incoming handlers receive decoded params and encode results", () => Effect.runPromise(Effect.scoped(Effect.gen(function*() {
+  it.effect("incoming handlers receive decoded params and encode results", () => Effect.scoped(Effect.gen(function*() {
     const observed = yield* Deferred.make<number>()
     const pair = yield* InMemory.make({ capacity: 8 })
     const connection = yield* AcpConnection.make({
@@ -46,5 +46,5 @@ describe("transforming method codecs", () => {
     yield* peer.send({ jsonrpc: "2.0", method: "test/notice", params: { value: "6" } })
     expect(yield* Deferred.await(observed)).toBe(6)
     void connection
-  }))))
+  })))
 })

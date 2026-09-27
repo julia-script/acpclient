@@ -1,20 +1,4 @@
-import { connectOptions } from "./support/connectOptions.ts"
-import * as Cause from "effect/Cause"
-import * as Json from "../src/internal/json.ts"
-/**
- * `AcpClient` contract suite.
- *
- * The version-independent cases run over both v1 and v2 against a scripted
- * agent, so the two protocols are held to the same application-facing
- * behavior wherever the spec says they should be. Version-specific cases
- * (acceptance, state updates, modes) are stated separately, because the
- * point of this change is that those differences stay honest rather than
- * being papered over.
- *
- * A future remote `AcpClient` implementation is expected to pass
- * `sessionContract` unchanged.
- */
-import { describe, expect, test } from "bun:test"
+import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
@@ -22,37 +6,19 @@ import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
-import type { AcpAgentConnection, AcpSession, ConnectOptions } from "../src/AcpClient.ts"
+import * as TestClock from "effect/testing/TestClock"
+import type { AcpSession } from "../src/AcpClient.ts"
 import { type OperationError, type ConnectError, AcpClient } from "../src/AcpClient.ts"
 import * as AcpLocalClient from "../src/AcpLocalClient.ts"
 import * as V1 from "../src/protocol/v1/Schema.ts"
 import * as V2 from "../src/protocol/v2/Schema.ts"
 import { type ScriptedAgent, scriptedAgent } from "./support/sessionAgent.ts"
 
-const run = <A, E>(effect: Effect.Effect<A, E, Scope.Scope>) => Effect.runPromise(Effect.scoped(effect))
+import { harness, text, settle, until, causeOf, failureOf, completePrompt, sessionContract, type Harness } from "./support/sessionContract.ts"
 
-interface Harness {
-  readonly agent: ScriptedAgent
-  readonly connection: AcpAgentConnection
-}
-
-/** Opens a client against a scripted agent of the given version. */
-export const harness = (
-  version: 1 | 2,
-  options: {
-    readonly agent?: Parameters<typeof scriptedAgent>[0]
-    readonly connect?: Partial<ConnectOptions>
-  } = {}
-): Effect.Effect<Harness, ConnectError | import("effect/unstable/rpc/RpcClientError").RpcClientError, Scope.Scope> =>
-  Effect.gen(function*() {
-    const agent = yield* scriptedAgent({ version, ...options.agent })
-    const client = yield* Effect.provide(
-      AcpClient,
-      AcpLocalClient.layer.pipe(Layer.provide(agent.connector))
-    )
-    const connection = yield* client.connect(connectOptions(version, options.connect))
-    return { agent, connection }
-  })
+const run = <A, E>(effect: Effect.Effect<A, E, Scope.Scope>) => Effect.scoped(effect)
+const hasText = (session: { readonly messages: ReadonlyArray<{ readonly content: ReadonlyArray<{ readonly type: string }> }> }, value: string) =>
+  session.messages.some((message) => message.content.some((part) => part.type === "text" && "text" in part && part.text === value))
 
 /** Opens a session on a fresh harness. */
 const withSession = (
@@ -66,7 +32,7 @@ const withSession = (
   })
 
 for (const version of [1, 2] as const) {
-  test(`v${version} terminal authentication advertises the version's capability shape`, () => run(Effect.gen(function*() {
+  it.effect(`v${version} terminal authentication advertises the version's capability shape`, () => run(Effect.gen(function*() {
     const { agent } = yield* harness(version, { connect: { terminalAuth: () => Effect.void } })
     const initialize = (yield* agent.received).find((message) => message.method === "initialize")
     expect(initialize).toMatchObject({ params: version === 1
@@ -75,7 +41,7 @@ for (const version of [1, 2] as const) {
     })
   })))
 
-  test(`v${version} completed submission stays successful after owner closure`, () => run(Effect.gen(function*() {
+  it.effect(`v${version} completed submission stays successful after owner closure`, () => run(Effect.gen(function*() {
     const owner = yield* Scope.make()
     const { agent, session } = yield* Scope.provide(withSession(version), owner)
     const submission = yield* session.submit([text("done")])
@@ -86,37 +52,13 @@ for (const version of [1, 2] as const) {
     expect((yield* submission.outcome).status).toEqual({ _tag: "completed" })
     yield* Scope.close(owner, Exit.void)
     expect((yield* submission.outcome).status).toEqual({ _tag: "completed" })
-    if (version === 1) expect(causeOf(yield* Effect.exit(submission.accepted))).toContain("AcpCapabilityUnsupported")
+    if (version === 1) expect(failureOf(yield* Effect.exit(submission.accepted))).toMatchObject({ _tag: "AcpCapabilityUnsupported" })
     else expect(yield* submission.accepted).toBe("m-1")
   })))
 }
 
-const text = (value: string) => ({ type: "text" as const, text: value })
-const hasText = (session: { readonly messages: ReadonlyArray<{ readonly content: ReadonlyArray<{ readonly type: string }> }> }, value: string) =>
-  session.messages.some((message) => message.content.some((part) => part.type === "text" && "text" in part && part.text === value))
-
-/** Lets forked fibers and the transport make progress. */
-const settle = Effect.repeat(Effect.yieldNow, { times: 40 })
-
-/** Waits until `condition` holds, so assertions do not race delivery. */
-const until = (condition: Effect.Effect<boolean>) =>
-  Effect.gen(function*() {
-    for (let attempt = 0; attempt < 200; attempt++) {
-      if (yield* condition) return
-      yield* Effect.sleep("5 millis")
-    }
-    throw new Error("Condition never held")
-  })
-
-/** The rendered cause of a failed exit, for message assertions. */
-const causeOf = (exit: Exit.Exit<unknown, unknown>) =>
-  Exit.isFailure(exit) ? Cause.pretty(exit.cause) : "<succeeded>"
-
-/** A prompt-response body appropriate to the version. */
-const promptResult = (version: 1 | 2) => version === 2 ? { messageId: "m-1" } : { stopReason: "end_turn" }
-
 for (const version of [1, 2] as const) {
-  test(`v${version} external submission waiters settle when the owning scope closes before a prompt reply`, () => run(Effect.gen(function*() {
+  it.effect(`v${version} external submission waiters settle when the owning scope closes before a prompt reply`, () => run(Effect.gen(function*() {
     const owner = yield* Scope.make()
     const { agent, session } = yield* Scope.provide(withSession(version), owner)
     const submission = yield* session.submit([text("held")])
@@ -128,38 +70,38 @@ for (const version of [1, 2] as const) {
     const outcomeExit = yield* Fiber.join(outcome)
     expect(Exit.isFailure(acceptedExit)).toBe(true)
     expect(Exit.isFailure(outcomeExit)).toBe(true)
-    if (version === 1) expect(causeOf(acceptedExit)).toContain("AcpCapabilityUnsupported")
-    else expect(causeOf(acceptedExit)).toContain("AcpConnectionClosed")
-    expect(causeOf(outcomeExit)).toContain("AcpConnectionClosed")
+    if (version === 1) expect(failureOf(acceptedExit)).toMatchObject({ _tag: "AcpCapabilityUnsupported" })
+    else expect(failureOf(acceptedExit)).toMatchObject({ _tag: "AcpConnectionClosed" })
+    expect(failureOf(outcomeExit)).toMatchObject({ _tag: "AcpConnectionClosed" })
   })))
 }
 
 for (const version of [1, 2] as const) {
-  test(`v${version} released session handles cannot send new commands`, () => run(Effect.gen(function*() {
+  it.effect(`v${version} released session handles cannot send new commands`, () => run(Effect.gen(function*() {
     const { agent, session } = yield* withSession(version)
     yield* session.release
     yield* session.release
-    expect(causeOf(yield* Effect.exit(session.submit([text("after release")])))).toContain("AcpConnectionClosed")
-    expect(causeOf(yield* Effect.exit(session.cancel))).toContain("AcpConnectionClosed")
+    expect(failureOf(yield* Effect.exit(session.submit([text("after release")])))).toMatchObject({ _tag: "AcpConnectionClosed" })
+    expect(failureOf(yield* Effect.exit(session.cancel))).toMatchObject({ _tag: "AcpConnectionClosed" })
     expect((yield* session.snapshot).sessionId).toBe("sess-1")
     const sent = yield* agent.received
     expect(sent.filter((message) => message.method === "session/prompt" || message.method === "session/cancel")).toHaveLength(0)
   })))
 
-  test(`v${version} releasing a session settles its admitted submission`, () => run(Effect.gen(function*() {
+  it.effect(`v${version} releasing a session settles its admitted submission`, () => run(Effect.gen(function*() {
     const { agent, session } = yield* withSession(version)
     const submission = yield* session.submit([text("held")])
     const accepted = yield* Effect.exit(submission.accepted).pipe(Effect.forkChild)
     const outcome = yield* Effect.exit(submission.outcome).pipe(Effect.forkChild)
     yield* agent.awaitRequest("session/prompt")
     yield* session.release
-    const acceptedCause = causeOf(yield* Fiber.join(accepted).pipe(Effect.timeout("200 millis")))
-    expect(acceptedCause).toContain(version === 1 ? "AcpCapabilityUnsupported" : "AcpConnectionClosed")
-    expect(causeOf(yield* Fiber.join(outcome).pipe(Effect.timeout("200 millis")))).toContain("AcpConnectionClosed")
+    const acceptedError = failureOf(yield* Fiber.join(accepted))
+    expect(acceptedError).toMatchObject({ _tag: version === 1 ? "AcpCapabilityUnsupported" : "AcpConnectionClosed" })
+    expect(failureOf(yield* Fiber.join(outcome))).toMatchObject({ _tag: "AcpConnectionClosed" })
   })))
 }
 
-test("v2 accepted remains successful when ownership ends before the turn completes", () => run(Effect.gen(function*() {
+it.effect("v2 accepted remains successful when ownership ends before the turn completes", () => run(Effect.gen(function*() {
   const owner = yield* Scope.make()
   const { agent, session } = yield* Scope.provide(withSession(2), owner)
   const submission = yield* session.submit([text("held")])
@@ -168,10 +110,10 @@ test("v2 accepted remains successful when ownership ends before the turn complet
   yield* agent.respond("session/prompt", { messageId: "accepted" })
   expect(yield* submission.accepted).toBe("accepted")
   yield* Scope.close(owner, Exit.void)
-  expect(causeOf(yield* Fiber.join(outcome))).toContain("AcpConnectionClosed")
+  expect(failureOf(yield* Fiber.join(outcome))).toMatchObject({ _tag: "AcpConnectionClosed" })
 })))
 
-test("v2 accepted remains successful after explicit session release", () => run(Effect.gen(function*() {
+it.effect("v2 accepted remains successful after explicit session release", () => run(Effect.gen(function*() {
   const { agent, session } = yield* withSession(2)
   const submission = yield* session.submit([text("held")])
   const outcome = yield* Effect.exit(submission.outcome).pipe(Effect.forkChild)
@@ -180,20 +122,8 @@ test("v2 accepted remains successful after explicit session release", () => run(
   expect(yield* submission.accepted).toBe("accepted")
   yield* session.release
   expect(yield* submission.accepted).toBe("accepted")
-  expect(causeOf(yield* Fiber.join(outcome).pipe(Effect.timeout("200 millis")))).toContain("AcpConnectionClosed")
+  expect(failureOf(yield* Fiber.join(outcome))).toMatchObject({ _tag: "AcpConnectionClosed" })
 })))
-
-/** Drives a submission to completion the way its protocol does. */
-const completePrompt = (agent: ScriptedAgent, version: 1 | 2, sessionId = "sess-1") =>
-  Effect.gen(function*() {
-    yield* agent.respond("session/prompt", promptResult(version))
-    if (version === 2) {
-      // v2 ends foreground work with an idle state update, not the response.
-      yield* settle
-      yield* agent.update(sessionId, { sessionUpdate: "state_update", state: "idle", stopReason: "end_turn" })
-    }
-    yield* settle
-  })
 
 const resumeOptions = (version: 1 | 2): Parameters<typeof harness>[1] => version === 2
   ? { agent: { version, initialize: {
@@ -244,408 +174,6 @@ const expectLiveRoute = (agent: ScriptedAgent, session: AcpSession, version: 1 |
     expect(yield* agent.awaitReply(id)).toMatchObject({ result: { outcome: { outcome: "selected", optionId: "allow" } } })
   })
 
-// -----------------------------------------------------------------------------
-// Version-independent contract
-// -----------------------------------------------------------------------------
-
-export const sessionContract = (version: 1 | 2, factory: typeof harness = harness, name = "local") => {
-  const harness = factory
-  const withSession = (version: 1 | 2, options: Parameters<typeof harness>[1] = {}) => Effect.gen(function*() {
-    const open = yield* harness(version, options)
-    const session = yield* open.connection.newSession({ cwd: "/work" })
-    return { ...open, session }
-  })
-  describe(`${name} v${version} contract`, () => {
-    test("creates a session and exposes negotiated capabilities", () =>
-      run(Effect.gen(function*() {
-        const { connection, session } = yield* withSession(version)
-        expect(session.sessionId).toBe("sess-1")
-        expect(session.version).toBe(version)
-        expect(connection.capabilities.version).toBe(version)
-        expect(connection.capabilities.session.prompt).toBe(true)
-        const snapshot = yield* session.snapshot
-        expect(snapshot.metadata.cwd).toBe("/work")
-      })))
-
-    test("boolean configuration changes include their wire discriminator", () =>
-      run(Effect.gen(function*() {
-        const { agent, session } = yield* withSession(version)
-        const setting = yield* Effect.forkChild(session.setConfigOption("flag", true))
-        expect(yield* agent.awaitRequest("session/set_config_option")).toEqual({
-          sessionId: "sess-1", configId: "flag", type: "boolean", value: true
-        })
-        yield* agent.respond("session/set_config_option", { configOptions: [] })
-        yield* Fiber.join(setting)
-      })))
-
-    test("agent updates are applied to the snapshot in order", () =>
-      run(Effect.gen(function*() {
-        const { agent, session } = yield* withSession(version)
-        yield* agent.update("sess-1", {
-          sessionUpdate: "agent_message_chunk",
-          ...(version === 2 ? { messageId: "m-1" } : {}),
-          content: text("one")
-        })
-        yield* agent.update("sess-1", {
-          sessionUpdate: "agent_message_chunk",
-          ...(version === 2 ? { messageId: "m-1" } : {}),
-          content: text("two")
-        })
-        yield* settle
-        const snapshot = yield* session.snapshot
-        expect(snapshot.messages).toHaveLength(1)
-        expect(snapshot.messages[0]!.content).toEqual([text("one"), text("two")])
-      })))
-
-    // Spec: "Update during new or resume".
-    test("updates arriving before the lifecycle response are retained", () =>
-      run(Effect.gen(function*() {
-        const agent = yield* scriptedAgent({ version, holdNewSession: true })
-        const client = yield* Effect.provide(
-          AcpClient,
-          AcpLocalClient.layer.pipe(Layer.provide(agent.connector))
-        )
-        const connection = yield* client.connect(connectOptions(version))
-
-        const opening = yield* Effect.forkChild(connection.newSession({ cwd: "/work" }))
-        yield* agent.awaitRequest("session/new")
-        // The agent starts reporting before it has answered session/new.
-        yield* agent.update("sess-1", {
-          sessionUpdate: "agent_message_chunk",
-          ...(version === 2 ? { messageId: "early" } : {}),
-          content: text("early")
-        })
-        yield* settle
-        yield* agent.releaseNewSession({ sessionId: "sess-1" })
-
-        const session = yield* Fiber.join(opening)
-        const snapshot = yield* session.snapshot
-        // The early update is part of the established session's state.
-        expect(snapshot.messages).toHaveLength(1)
-        expect(snapshot.messages[0]!.content).toEqual([text("early")])
-      })))
-
-    test("submitting dispatches one prompt and records it", () =>
-      run(Effect.gen(function*() {
-        const { agent, session } = yield* withSession(version)
-        const submission = yield* session.submit([text("hello")])
-        const params = yield* agent.awaitRequest("session/prompt")
-        expect(params).toMatchObject({ sessionId: "sess-1" })
-        expect(params).toMatchObject({ prompt: [text("hello")] })
-
-        const snapshot = yield* session.snapshot
-        expect(snapshot.submissions[submission.id]!.status).toEqual({ _tag: "dispatched" })
-        expect(snapshot.activeSubmissionId).toBe(submission.id)
-      })))
-
-    // Spec: "Busy submission race".
-    test("a concurrent second submission is rejected without sending a prompt", () =>
-      run(Effect.gen(function*() {
-        const { agent, session } = yield* withSession(version)
-        const [first, second] = yield* Effect.all([
-          Effect.exit(session.submit([text("one")])),
-          Effect.exit(session.submit([text("two")]))
-        ], { concurrency: 2 })
-        yield* settle
-
-        const admitted = [first, second].filter(Exit.isSuccess)
-        const rejected = [first, second].filter(Exit.isFailure)
-        expect(admitted).toHaveLength(1)
-        expect(rejected).toHaveLength(1)
-        expect((yield* Json.encode(rejected[0]!.cause))).toContain("AcpSessionBusy")
-
-        const sent = yield* agent.received
-        expect(sent.filter((message) => message.method === "session/prompt")).toHaveLength(1)
-      })))
-
-    test("the session accepts a new submission once the previous one completes", () =>
-      run(Effect.gen(function*() {
-        const { agent, session } = yield* withSession(version)
-        const first = yield* session.submit([text("one")])
-        yield* agent.awaitRequest("session/prompt")
-        yield* completePrompt(agent, version)
-        yield* Fiber.join(yield* Effect.forkChild(first.outcome))
-
-        const second = yield* session.submit([text("two")])
-        expect(second.id).not.toBe(first.id)
-      })))
-
-    test("a prompt failure records the failure and frees the session", () =>
-      run(Effect.gen(function*() {
-        const { agent, session } = yield* withSession(version)
-        const submission = yield* session.submit([text("boom")])
-        yield* agent.awaitRequest("session/prompt")
-        yield* agent.respondError("session/prompt", -32603, "Internal error")
-        yield* settle
-
-        const snapshot = yield* session.snapshot
-        expect(snapshot.submissions[submission.id]!.status).toMatchObject({
-          _tag: "failed",
-          failure: { _tag: "remote", code: -32603 }
-        })
-        // The foreground is released, so the next submission is admitted.
-        expect(yield* Effect.exit(session.submit([text("again")]))).toSatisfy(Exit.isSuccess)
-      })))
-
-    // Spec: "Duplicate interaction response".
-    test("only one caller resolves a permission request", () =>
-      run(Effect.gen(function*() {
-        const { agent, session } = yield* withSession(version)
-        yield* session.submit([text("edit")])
-        yield* agent.awaitRequest("session/prompt")
-        yield* agent.send({
-          jsonrpc: "2.0",
-          id: "perm-1",
-          method: "session/request_permission",
-          params: {
-            sessionId: "sess-1",
-            title: "Edit file",
-            ...(version === 1 ? { toolCall: { toolCallId: "t-1", title: "Edit file" } } : {}),
-            options: [{ optionId: "allow", name: "Allow", kind: "allow_once" }]
-          }
-        })
-        yield* settle
-
-        const pending = Object.values((yield* session.snapshot).interactions)
-        expect(pending).toHaveLength(1)
-        const interactionId = pending[0]!.interactionId
-
-        const [a, b] = yield* Effect.all([
-          Effect.exit(session.resolveInteraction(interactionId, { _tag: "selected", optionId: "allow" })),
-          Effect.exit(session.resolveInteraction(interactionId, { _tag: "selected", optionId: "allow" }))
-        ], { concurrency: 2 })
-        yield* settle
-
-        expect([a, b].filter(Exit.isSuccess)).toHaveLength(1)
-        expect((yield* Json.encode([a, b].find(Exit.isFailure)!.cause))).toContain("AcpInteractionAlreadyResolved")
-
-        // Exactly one response went on the wire.
-        const sent = yield* agent.received
-        expect(sent.filter((message) => message.id === "perm-1")).toHaveLength(1)
-        expect(sent.find((message) => message.id === "perm-1")!.result).toEqual({
-          outcome: { outcome: "selected", optionId: "allow" }
-        })
-        expect((yield* session.snapshot).interactions[interactionId]!.status).toBe("resolved")
-      })))
-
-    // Spec: "User input is delayed".
-    test("unrelated traffic keeps flowing while an interaction waits", () =>
-      run(Effect.gen(function*() {
-        const { agent, session } = yield* withSession(version)
-        yield* session.submit([text("edit")])
-        yield* agent.awaitRequest("session/prompt")
-        yield* agent.send({
-          jsonrpc: "2.0",
-          id: "perm-1",
-          method: "session/request_permission",
-          params: {
-            sessionId: "sess-1",
-            title: "Edit file",
-            ...(version === 1 ? { toolCall: { toolCallId: "t-1", title: "Edit file" } } : {}),
-            options: [{ optionId: "allow", name: "Allow", kind: "allow_once" }]
-          }
-        })
-        yield* settle
-
-        // Nobody has answered the permission request yet.
-        const before = yield* agent.received
-        expect(before.filter((message) => message.id === "perm-1")).toHaveLength(0)
-
-        // Updates still arrive and are still applied.
-        yield* agent.update("sess-1", {
-          sessionUpdate: "agent_message_chunk",
-          ...(version === 2 ? { messageId: "m-9" } : {}),
-          content: text("still working")
-        })
-        yield* settle
-        expect((yield* session.snapshot).messages).toHaveLength(1)
-        expect(Object.values((yield* session.snapshot).interactions)[0]!.status).toBe("pending")
-      })))
-
-    // Spec: "Unsubscribe during foreground work".
-    test("releasing an observation does not close, delete, or cancel the session", () =>
-      run(Effect.gen(function*() {
-        const { agent, session } = yield* withSession(version)
-        yield* session.submit([text("work")])
-        yield* agent.awaitRequest("session/prompt")
-
-        const observerScope = yield* Scope.make()
-        yield* Scope.provide(session.observe, observerScope)
-        yield* Scope.close(observerScope, Exit.void)
-        yield* settle
-
-        // Nothing was sent on the observer's behalf.
-        const sent = yield* agent.received
-        for (const method of ["session/cancel", "session/close", "session/delete"]) {
-          expect(sent.filter((message) => message.method === method)).toHaveLength(0)
-        }
-        // The runtime keeps applying updates after the observer is gone.
-        yield* agent.update("sess-1", {
-          sessionUpdate: "agent_message_chunk",
-          ...(version === 2 ? { messageId: "m-1" } : {}),
-          content: text("after")
-        })
-        yield* settle
-        expect((yield* session.snapshot).messages).toHaveLength(1)
-      })))
-
-    test("observe delivers a snapshot and the changes after it with no gap", () =>
-      run(Effect.gen(function*() {
-        const { agent, session } = yield* withSession(version)
-        yield* agent.update("sess-1", {
-          sessionUpdate: "agent_message_chunk",
-          ...(version === 2 ? { messageId: "m-1" } : {}),
-          content: text("before")
-        })
-        yield* settle
-
-        const observed = yield* session.observe
-        expect(observed.snapshot.messages).toHaveLength(1)
-
-        const collecting = yield* Effect.forkChild(Stream.runCollect(Stream.take(observed.changes, 1)))
-        yield* agent.update("sess-1", {
-          sessionUpdate: "agent_message_chunk",
-          ...(version === 2 ? { messageId: "m-2" } : {}),
-          content: text("after")
-        })
-        const events = yield* Fiber.join(collecting)
-        expect(events).toHaveLength(1)
-        expect(events[0]!._tag).toBe("snapshot")
-        // The observed change is strictly later than the boundary snapshot.
-        expect(events[0]!.snapshot.seq).toBeGreaterThan(observed.snapshot.seq)
-      })))
-
-    // Spec: "Slow observer exceeds capacity".
-    test("an observer that falls behind is told to resynchronize", () =>
-      run(Effect.gen(function*() {
-        const { agent, session } = yield* withSession(version, { connect: { observerCapacity: 2 } })
-        const observed = yield* session.observe
-
-        // Publish well past the observer's capacity without draining it.
-        for (let index = 0; index < 8; index++) {
-          yield* agent.update("sess-1", {
-            sessionUpdate: "agent_message_chunk",
-            ...(version === 2 ? { messageId: `m-${index}` } : {}),
-            content: text(String(index))
-          })
-        }
-        // Wait for the reducer to catch up rather than assuming a fixed
-        // number of yields is enough.
-        yield* until(Effect.map(session.snapshot, (snapshot) => snapshot.seq >= 8))
-
-        const collected = yield* Effect.exit(Stream.runCollect(observed.changes))
-        // Falling behind surfaces as an explicit typed failure, not silence.
-        expect(causeOf(collected)).toContain("AcpSubscriptionOverflow")
-        // Protocol processing was never blocked by the stalled observer: every
-        // update was still applied. (Counting `seq` rather than messages,
-        // because v1 folds same-role chunks into one local message.)
-        expect((yield* session.snapshot).seq).toBeGreaterThanOrEqual(8)
-
-        // A fresh boundary recovers: that is what resync asks the caller to do.
-        const resumed = yield* session.observe
-        expect(resumed.snapshot.seq).toBeGreaterThanOrEqual(8)
-      })))
-
-    // Spec: "Updates after cancel".
-    test("updates after cancel are applied and cancellation waits for completion", () =>
-      run(Effect.gen(function*() {
-        const { agent, session } = yield* withSession(version)
-        yield* session.submit([text("long")])
-        yield* agent.awaitRequest("session/prompt")
-
-        const cancelling = yield* Effect.forkChild(session.cancel)
-        yield* settle
-        const sent = yield* agent.received
-        expect(sent.filter((message) => message.method === "session/cancel")).toHaveLength(1)
-
-        // A late tool update still lands, and cancel is not yet confirmed.
-        yield* agent.update("sess-1", { sessionUpdate: "tool_call_update", toolCallId: "t-1", status: "completed" })
-        yield* settle
-        expect((yield* session.snapshot).toolCalls["t-1"]!.status).toBe("completed")
-        expect(cancelling.pollUnsafe()).toBeUndefined()
-
-        yield* completePrompt(agent, version)
-        expect(yield* Fiber.join(cancelling)).toBeUndefined()
-      })))
-
-    test("lists sessions where the agent supports it", () =>
-      run(Effect.gen(function*() {
-        const { agent, connection } = yield* harness(version)
-        const listing = yield* Effect.forkChild(connection.listSessions())
-        yield* agent.awaitRequest("session/list")
-        yield* agent.respond("session/list", {
-          sessions: [{ sessionId: "sess-1", cwd: "/work", title: "One" }]
-        })
-        expect(yield* Fiber.join(listing)).toEqual([
-          { sessionId: "sess-1", cwd: "/work", title: "One", updatedAt: null }
-        ])
-      })))
-
-    // Spec: "Unsupported session operation".
-    test("an unsupported operation fails before anything is sent", () =>
-      run(Effect.gen(function*() {
-        const { agent, connection } = yield* harness(version, {
-          agent: {
-            version,
-            // An agent advertising no optional session capabilities at all.
-            initialize: version === 2
-              ? { protocolVersion: 2, info: { name: "bare", version: "1" }, capabilities: { session: {} } }
-              : { protocolVersion: 1, agentCapabilities: {} }
-          }
-        })
-        expect(connection.capabilities.session.delete).toBe(false)
-
-        const session = yield* connection.newSession({ cwd: "/work" })
-        const exit = yield* Effect.exit(session.delete)
-        expect(causeOf(exit)).toContain("AcpCapabilityUnsupported")
-
-        const sent = yield* agent.received
-        expect(sent.filter((message) => message.method === "session/delete")).toHaveLength(0)
-      })))
-
-    test("unsupported prompt content is rejected before dispatch", () =>
-      run(Effect.gen(function*() {
-        const { agent, session } = yield* withSession(version, {
-          agent: {
-            version,
-            initialize: version === 2
-              ? { protocolVersion: 2, info: { name: "bare", version: "1" }, capabilities: { session: {} } }
-              : { protocolVersion: 1, agentCapabilities: {} }
-          }
-        })
-        const exit = yield* Effect.exit(session.submit([{ type: "image", data: "", mimeType: "image/png" }]))
-        expect(causeOf(exit)).toContain("AcpCapabilityUnsupported")
-        const sent = yield* agent.received
-        expect(sent.filter((message) => message.method === "session/prompt")).toHaveLength(0)
-      })))
-
-    test("an unsupported MCP server configuration is rejected before dispatch", () =>
-      run(Effect.gen(function*() {
-        const { agent, connection } = yield* harness(version)
-        const exit = yield* Effect.exit(
-          connection.newSession({ cwd: "/work", mcpServers: [{ type: "http", name: "test", url: "https://example.test", headers: [] }] })
-        )
-        expect(causeOf(exit)).toContain("AcpCapabilityUnsupported")
-        const sent = yield* agent.received
-        expect(sent.filter((message) => message.method === "session/new")).toHaveLength(0)
-      })))
-
-    test("authentication is restricted to advertised methods", () =>
-      run(Effect.gen(function*() {
-        const { agent, connection } = yield* harness(version)
-        expect(connection.capabilities.auth.methods).toEqual(["oauth"])
-        const exit = yield* Effect.exit(connection.authenticate("invented"))
-        expect(causeOf(exit)).toContain("AcpCapabilityUnsupported")
-
-        const authenticating = yield* Effect.forkChild(connection.authenticate("oauth"))
-        const method = version === 2 ? "auth/login" : "authenticate"
-        yield* agent.awaitRequest(method)
-        yield* agent.respond(method, {})
-        yield* Fiber.join(authenticating)
-      })))
-  })
-}
-
 sessionContract(1)
 sessionContract(2)
 
@@ -654,7 +182,7 @@ sessionContract(2)
 // -----------------------------------------------------------------------------
 
 describe("v2 acceptance and completion are separate", () => {
-  test("a second turn stays busy after a chunk until its own idle update", () =>
+  it.effect("a second turn stays busy after a chunk until its own idle update", () =>
     run(Effect.gen(function*() {
       const { agent, session } = yield* withSession(2)
       const first = yield* session.submit([text("one")])
@@ -681,7 +209,7 @@ describe("v2 acceptance and completion are separate", () => {
       expect(outcome.pollUnsafe()).toBeUndefined()
       expect(cancelling.pollUnsafe()).toBeUndefined()
       expect((yield* session.snapshot).activeSubmissionId).toBe(second.id)
-      expect(causeOf(yield* Effect.exit(session.submit([text("three")])))).toContain("AcpSessionBusy")
+      expect(failureOf(yield* Effect.exit(session.submit([text("three")])))).toMatchObject({ _tag: "AcpSessionBusy" })
       expect((yield* agent.received).filter((message) => message.method === "session/prompt")).toHaveLength(2)
 
       yield* agent.update("sess-1", { sessionUpdate: "state_update", state: "idle", stopReason: "end_turn" })
@@ -689,7 +217,7 @@ describe("v2 acceptance and completion are separate", () => {
       expect(yield* Fiber.join(cancelling)).toBeUndefined()
     })))
 
-  test("an idle update before the v2 prompt response still completes the turn", () =>
+  it.effect("an idle update before the v2 prompt response still completes the turn", () =>
     run(Effect.gen(function*() {
       const { agent, session } = yield* withSession(2)
       const first = yield* session.submit([text("one")])
@@ -711,7 +239,7 @@ describe("v2 acceptance and completion are separate", () => {
     })))
 
   // Spec: "User update precedes acknowledgement".
-  test("acceptance carries the agent message id and does not end foreground work", () =>
+  it.effect("acceptance carries the agent message id and does not end foreground work", () =>
     run(Effect.gen(function*() {
       const { agent, session } = yield* withSession(2)
       const submission = yield* session.submit([text("hi")])
@@ -735,18 +263,18 @@ describe("v2 acceptance and completion are separate", () => {
       expect((yield* session.snapshot).activeSubmissionId).toBeNull()
     })))
 
-  test("setMode is refused on v2", () =>
+  it.effect("setMode is refused on v2", () =>
     run(Effect.gen(function*() {
       const { agent, session } = yield* withSession(2)
       const exit = yield* Effect.exit(session.setMode("architect"))
-      expect(causeOf(exit)).toContain("AcpCapabilityUnsupported")
+      expect(failureOf(exit)).toMatchObject({ _tag: "AcpCapabilityUnsupported" })
       expect((yield* agent.received).filter((message) => message.method === "session/set_mode")).toHaveLength(0)
     })))
 })
 
 describe("v1 compatibility", () => {
   // Spec: "V1 prompt remains pending".
-  test("acceptance is unavailable and the prompt response is turn completion", () =>
+  it.effect("acceptance is unavailable and the prompt response is turn completion", () =>
     run(Effect.gen(function*() {
       const { agent, session } = yield* withSession(1)
       const submission = yield* session.submit([text("hi")])
@@ -759,7 +287,7 @@ describe("v1 compatibility", () => {
 
       yield* agent.respond("session/prompt", { stopReason: "end_turn" })
       const acceptance = yield* Effect.exit(submission.accepted)
-      expect(causeOf(acceptance)).toContain("AcpCapabilityUnsupported")
+      expect(failureOf(acceptance)).toMatchObject({ _tag: "AcpCapabilityUnsupported" })
 
       const outcome = yield* submission.outcome
       expect(outcome.status).toEqual({ _tag: "completed" })
@@ -768,7 +296,7 @@ describe("v1 compatibility", () => {
     })))
 
   // Spec: "Missing message ID during replay".
-  test("ID-less replay messages use local identities and are not matched to submissions", () =>
+  it.effect("ID-less replay messages use local identities and are not matched to submissions", () =>
     run(Effect.gen(function*() {
       const { agent, session } = yield* withSession(1)
       const submission = yield* session.submit([text("same text")])
@@ -784,14 +312,14 @@ describe("v1 compatibility", () => {
     })))
 
   // Spec: "Execution handler absent".
-  test("terminal support is not advertised without an installed handler", () =>
+  it.effect("terminal support is not advertised without an installed handler", () =>
     run(Effect.gen(function*() {
       const { connection } = yield* harness(1)
       expect(connection.capabilities.terminal).toBe(false)
       expect(connection.capabilities.filesystem).toBe(false)
     })))
 
-  test("installed handlers are advertised and actually serve agent requests", () =>
+  it.effect("installed handlers are advertised and actually serve agent requests", () =>
     run(Effect.gen(function*() {
       const { agent, connection } = yield* harness(1, {
         connect: {
@@ -821,7 +349,7 @@ describe("v1 compatibility", () => {
     })))
 
   // Spec: "Version-aware history request".
-  test("resume reports when history recovery is unavailable", () =>
+  it.effect("resume reports when history recovery is unavailable", () =>
     run(Effect.gen(function*() {
       const { agent, connection } = yield* harness(1, {
         agent: {
@@ -831,12 +359,12 @@ describe("v1 compatibility", () => {
         }
       })
       const exit = yield* Effect.exit(connection.resumeSession({ sessionId: "sess-1", cwd: "/work" }))
-      expect(causeOf(exit)).toContain("AcpHistoryUnavailable")
+      expect(failureOf(exit)).toMatchObject({ _tag: "AcpHistoryUnavailable" })
       const sent = yield* agent.received
       expect(sent.filter((message) => message.method === "session/load")).toHaveLength(0)
     })))
 
-  test("resume uses session/load when the agent advertises loadSession", () =>
+  it.effect("resume uses session/load when the agent advertises loadSession", () =>
     run(Effect.gen(function*() {
       const { agent, connection } = yield* harness(1, {
         agent: {
@@ -857,7 +385,7 @@ describe("v1 compatibility", () => {
       expect(snapshot.config["acp/modes"]).toBeDefined()
     })))
 
-  test("setMode dispatches on v1", () =>
+  it.effect("setMode dispatches on v1", () =>
     run(Effect.gen(function*() {
       const { agent, session } = yield* withSession(1)
       const setting = yield* Effect.forkChild(session.setMode("architect"))
@@ -882,7 +410,7 @@ describe("interaction deadlines and withdrawal", () => {
   })
 
   // Spec: "User input is delayed" — the deadline half.
-  test("a configured deadline settles the request with the protocol's cancelled outcome", () =>
+  it.effect("a configured deadline settles the request with the protocol's cancelled outcome", () =>
     run(Effect.gen(function*() {
       const { agent, session } = yield* withSession(2, { connect: { interactionTimeout: "50 millis" } })
       yield* agent.send(permission(2))
@@ -890,22 +418,24 @@ describe("interaction deadlines and withdrawal", () => {
 
       const interactionId = Object.keys((yield* session.snapshot).interactions)[0]!
       // Nobody answers; the deadline elapses.
-      yield* until(
-        Effect.map(session.snapshot, (snapshot) => snapshot.interactions[interactionId]!.status === "expired")
-      )
+      const observed = yield* session.observe
+      yield* TestClock.adjust("50 millis")
+      if (observed.snapshot.interactions[interactionId]!.status !== "expired") {
+        yield* Stream.runHead(Stream.filter(observed.changes, (event) =>
+          event.snapshot.interactions[interactionId]?.status === "expired"))
+      }
 
       // The agent still gets a well-formed response rather than silence.
-      yield* until(Effect.map(agent.received, (sent) => sent.some((message) => message.id === "perm-1")))
-      const reply = (yield* agent.received).find((message) => message.id === "perm-1")
+      const reply = yield* agent.awaitReply("perm-1")
       expect(reply).toMatchObject({ result: { outcome: { outcome: "cancelled" } } })
 
       // Resolving an expired interaction is refused, distinctly from a
       // duplicate resolution.
       const exit = yield* Effect.exit(session.resolveInteraction(interactionId, { _tag: "selected", optionId: "allow" }))
-      expect(causeOf(exit)).toContain("AcpInteractionExpired")
+      expect(failureOf(exit)).toMatchObject({ _tag: "AcpInteractionExpired" })
     })))
 
-  test("an incoming request cancellation settles the interaction as cancelled", () =>
+  it.effect("an incoming request cancellation settles the interaction as cancelled", () =>
     run(Effect.gen(function*() {
       const { agent, session } = yield* withSession(2)
       yield* agent.send(permission(2))
@@ -923,7 +453,7 @@ describe("interaction deadlines and withdrawal", () => {
       yield* until(Effect.map(session.snapshot, (snapshot) => snapshot.messages.length === 1))
     })))
 
-  test("an elicitation is exposed as a pending interaction and resolved once", () =>
+  it.effect("an elicitation is exposed as a pending interaction and resolved once", () =>
     run(Effect.gen(function*() {
       const { agent, session } = yield* withSession(2)
       yield* agent.send({
@@ -945,12 +475,12 @@ describe("interaction deadlines and withdrawal", () => {
       })
 
       const again = yield* Effect.exit(session.resolveInteraction(interaction.interactionId, { _tag: "decline" }))
-      expect(causeOf(again)).toContain("AcpInteractionAlreadyResolved")
+      expect(failureOf(again)).toMatchObject({ _tag: "AcpInteractionAlreadyResolved" })
     })))
 })
 
 describe("provisional routing bounds", () => {
-  test("overflowing the provisional buffer fails explicitly instead of dropping updates", () =>
+  it.effect("overflowing the provisional buffer fails explicitly instead of dropping updates", () =>
     run(Effect.gen(function*() {
       const agent = yield* scriptedAgent({ version: 2, holdNewSession: true })
       const client = yield* Effect.provide(
@@ -978,10 +508,10 @@ describe("provisional routing bounds", () => {
 
       // Silently losing required deltas is exactly what the bound forbids.
       const exit = yield* Fiber.await(opening)
-      expect(causeOf(exit)).toContain("AcpProvisionalOverflow")
+      expect(failureOf(exit)).toMatchObject({ _tag: "AcpProvisionalOverflow" })
     })))
 
-  test("overflowed new sessions leave no route under the returned session id", () =>
+  it.effect("overflowed new sessions leave no route under the returned session id", () =>
     run(Effect.gen(function*() {
       const { agent, connection } = yield* harness(2, {
         agent: { version: 2, holdNewSession: true },
@@ -993,7 +523,7 @@ describe("provisional routing bounds", () => {
         yield* agent.update("sess-1", { sessionUpdate: "agent_message_chunk", messageId: `overflow-${index}`, content: text(String(index)) })
       }
       yield* agent.releaseNewSession({ sessionId: "sess-1" })
-      expect(causeOf(yield* Fiber.await(first))).toContain("AcpProvisionalOverflow")
+      expect(failureOf(yield* Fiber.await(first))).toMatchObject({ _tag: "AcpProvisionalOverflow" })
 
       const second = yield* Effect.forkChild(connection.newSession({ cwd: "/work" }))
       yield* agent.awaitRequest("session/new")
@@ -1005,7 +535,7 @@ describe("provisional routing bounds", () => {
 
   for (const version of [1, 2] as const) {
     for (const cursor of version === 2 ? ["start", "_cursor"] as const : ["start"] as const) {
-      test(`v${version} failed ${cursor} replay leaves prior history unchanged`, () =>
+      it.effect(`v${version} failed ${cursor} replay leaves prior history unchanged`, () =>
         run(Effect.gen(function*() {
           const { agent, connection, session } = yield* withSession(version, resumeOptions(version))
           const observed = yield* session.observe
@@ -1034,7 +564,7 @@ describe("provisional routing bounds", () => {
         })))
     }
 
-    test(`v${version} failed resume keeps the prior route and live events`, () =>
+    it.effect(`v${version} failed resume keeps the prior route and live events`, () =>
       run(Effect.gen(function*() {
         const { agent, connection, session } = yield* withSession(version, resumeOptions(version))
         const resuming = yield* Effect.forkChild(connection.resumeSession({ sessionId: "sess-1", cwd: "/work" }))
@@ -1048,7 +578,7 @@ describe("provisional routing bounds", () => {
         expect(snapshot.messages.flatMap((message) => message.content).filter((part) => "text" in part && part.text === "during-failure")).toHaveLength(1)
       })))
 
-    test(`v${version} interrupted resume restores the prior route`, () =>
+    it.effect(`v${version} interrupted resume restores the prior route`, () =>
       run(Effect.gen(function*() {
         const { agent, connection, session } = yield* withSession(version, resumeOptions(version))
         const resuming = yield* Effect.forkChild(connection.resumeSession({ sessionId: "sess-1", cwd: "/work" }))
@@ -1057,7 +587,7 @@ describe("provisional routing bounds", () => {
         yield* expectLiveRoute(agent, session, version, `after-interrupt-v${version}`)
       })))
 
-    test(`v${version} resume overflow preserves an eligible prior route`, () =>
+    it.effect(`v${version} resume overflow preserves an eligible prior route`, () =>
       run(Effect.gen(function*() {
         const { agent, connection, session } = yield* withSession(version, {
           ...resumeOptions(version), connect: { provisional: { updates: 2 } }
@@ -1068,13 +598,13 @@ describe("provisional routing bounds", () => {
           yield* agent.update("sess-1", { sessionUpdate: "agent_message_chunk", ...(version === 2 ? { messageId: `replay-${index}` } : {}), content: text(`replay-${index}`) })
         }
         yield* agent.respond("session/resume", {})
-        expect(causeOf(yield* Fiber.await(resuming))).toContain("AcpProvisionalOverflow")
+        expect(failureOf(yield* Fiber.await(resuming))).toMatchObject({ _tag: "AcpProvisionalOverflow" })
         yield* expectLiveRoute(agent, session, version, `after-overflow-v${version}`)
         const snapshot = yield* session.snapshot
         for (let index = 0; index < 3; index++) expect(hasText(snapshot, `replay-${index}`)).toBe(true)
       })))
 
-    test(`v${version} successful resume owns its route after the old handle releases`, () =>
+    it.effect(`v${version} successful resume owns its route after the old handle releases`, () =>
       run(Effect.gen(function*() {
         const { agent, connection, session: previous } = yield* withSession(version, resumeOptions(version))
         const resuming = yield* Effect.forkChild(connection.resumeSession({ sessionId: "sess-1", cwd: "/work" }))
@@ -1089,7 +619,7 @@ describe("provisional routing bounds", () => {
   }
 
   for (const framing of ["batch", "consecutive frames"] as const) {
-    test(`an update after a failed replay response reaches the prior runtime in ${framing}`, () =>
+    it.effect(`an update after a failed replay response reaches the prior runtime in ${framing}`, () =>
       run(Effect.gen(function*() {
         const { agent, connection, session } = yield* withSession(2, resumeOptions(2))
         const observed = yield* session.observe
@@ -1117,7 +647,7 @@ describe("provisional routing bounds", () => {
       })))
   }
 
-  test("failed replay does not duplicate history evicted from raw updates", () =>
+  it.effect("failed replay does not duplicate history evicted from raw updates", () =>
     run(Effect.gen(function*() {
       const { agent, connection, session } = yield* withSession(2, {
         ...resumeOptions(2), connect: { limits: { rawUpdates: 1 } }
@@ -1143,7 +673,7 @@ describe("provisional routing bounds", () => {
     })))
 
   for (const version of [1, 2] as const) {
-    test(`v${version} successful explicit replay promotes the buffered candidate`, () =>
+    it.effect(`v${version} successful explicit replay promotes the buffered candidate`, () =>
       run(Effect.gen(function*() {
         const { agent, connection, session: previous } = yield* withSession(version, resumeOptions(version))
         const resuming = yield* Effect.forkChild(connection.resumeSession({ sessionId: "sess-1", cwd: "/work", replayFrom: { type: "start" } }))
@@ -1157,7 +687,7 @@ describe("provisional routing bounds", () => {
       })))
   }
 
-  test("releasing the prior session during resume prevents route restoration", () =>
+  it.effect("releasing the prior session during resume prevents route restoration", () =>
     run(Effect.gen(function*() {
       const { agent, connection, session } = yield* withSession(2, resumeOptions(2))
       const resuming = yield* Effect.forkChild(connection.resumeSession({ sessionId: "sess-1", cwd: "/work" }))
@@ -1183,7 +713,7 @@ describe("provisional routing bounds", () => {
 
   for (const version of [1, 2] as const) {
     for (const kind of ["permission", "elicitation"] as const) {
-      test(`v${version} ordinary release answers a pending ${kind} with cancellation`, () =>
+      it.effect(`v${version} ordinary release answers a pending ${kind} with cancellation`, () =>
         run(Effect.gen(function*() {
           const { agent, session } = yield* withSession(version)
           const observed = yield* session.observe
@@ -1218,7 +748,7 @@ describe("provisional routing bounds", () => {
   }
 
   for (const version of [1, 2] as const) {
-    test(`v${version} permission admitted during resume receives a response after promotion`, () =>
+    it.effect(`v${version} permission admitted during resume receives a response after promotion`, () =>
       run(Effect.gen(function*() {
         const { agent, connection, session } = yield* withSession(version, resumeOptions(version))
         const resuming = yield* Effect.forkChild(connection.resumeSession({ sessionId: "sess-1", cwd: "/work" }))
@@ -1243,7 +773,7 @@ describe("provisional routing bounds", () => {
 })
 
 describe("resource ownership", () => {
-  test("closing the client scope releases the connection and its sessions", () =>
+  it.effect("closing the client scope releases the connection and its sessions", () =>
     run(Effect.gen(function*() {
       const outer = yield* Scope.Scope
       const clientScope = yield* Scope.fork(outer)
@@ -1254,41 +784,41 @@ describe("resource ownership", () => {
     })))
 })
 
-test("v1 acceptance is immediately unavailable while the turn is still running", () => run(Effect.gen(function*() {
+it.effect("v1 acceptance is immediately unavailable while the turn is still running", () => run(Effect.gen(function*() {
   const { agent, session } = yield* withSession(1)
   const submission = yield* session.submit([text("wait")])
-  expect(causeOf(yield* Effect.exit(submission.accepted.pipe(Effect.timeout("50 millis"))))).toContain("AcpCapabilityUnsupported")
+  expect(failureOf(yield* Effect.exit(submission.accepted.pipe(Effect.timeout("50 millis"))))).toMatchObject({ _tag: "AcpCapabilityUnsupported" })
   yield* agent.awaitRequest("session/prompt")
   expect((yield* agent.received).some((m) => m.method === "session/prompt")).toBe(true)
 })))
 
-test("malformed prompt validation does not leave a phantom busy session", () => run(Effect.gen(function*() {
+it.effect("malformed prompt validation does not leave a phantom busy session", () => run(Effect.gen(function*() {
   const { agent, session } = yield* withSession(2)
   // Deliberately invalid input from an untyped caller: text requires `text`.
-  expect(causeOf(yield* Effect.exit(session.submit([{ type: "text" } as never])))).toContain("AcpProtocolError")
+  expect(failureOf(yield* Effect.exit(session.submit([{ type: "text" } as never])))).toMatchObject({ _tag: "AcpProtocolError" })
   const valid = yield* session.submit([text("valid")])
   yield* agent.awaitRequest("session/prompt")
   yield* completePrompt(agent, 2)
   expect((yield* valid.outcome).status._tag).toBe("completed")
 })))
 
-test("absent v2 session surface fails before sending session/new", () => run(Effect.gen(function*() {
+it.effect("absent v2 session surface fails before sending session/new", () => run(Effect.gen(function*() {
   const { agent, connection } = yield* harness(2, { agent: { version: 2, initialize: { protocolVersion: 2, info: { name: "extensions", version: "1" }, capabilities: {} } } })
-  expect(causeOf(yield* Effect.exit(connection.newSession({ cwd: "/work" })))).toContain("AcpCapabilityUnsupported")
+  expect(failureOf(yield* Effect.exit(connection.newSession({ cwd: "/work" })))).toMatchObject({ _tag: "AcpCapabilityUnsupported" })
   expect((yield* agent.received).some((m) => m.method === "session/new")).toBe(false)
 })))
 
-test("invalid permission selection leaves the pending request available for a valid answer", () => run(Effect.gen(function*() {
+it.effect("invalid permission selection leaves the pending request available for a valid answer", () => run(Effect.gen(function*() {
   const { agent, session } = yield* withSession(2)
   yield* agent.send({ jsonrpc: "2.0", id: "p", method: "session/request_permission", params: { sessionId: "sess-1", title: "Permission", options: [{ optionId: "allow", name: "Allow", kind: "allow_once" }] } })
   yield* until(Effect.map(session.snapshot, (s) => Object.keys(s.interactions).length === 1))
   const id = Object.keys((yield* session.snapshot).interactions)[0]!
-  expect(causeOf(yield* Effect.exit(session.resolveInteraction(id, { _tag: "selected", optionId: "invented" })))).toContain("AcpProtocolError")
+  expect(failureOf(yield* Effect.exit(session.resolveInteraction(id, { _tag: "selected", optionId: "invented" })))).toMatchObject({ _tag: "AcpProtocolError" })
   expect((yield* session.snapshot).interactions[id]!.status).toBe("pending")
   yield* session.resolveInteraction(id, { _tag: "selected", optionId: "allow" })
 })))
 
-test("submission handles retain their completed record after snapshot retention evicts it", () => run(Effect.gen(function*() {
+it.effect("submission handles retain their completed record after snapshot retention evicts it", () => run(Effect.gen(function*() {
   const { agent, session } = yield* withSession(2, { connect: { limits: { submissions: 1 } } })
   const first = yield* session.submit([text("first")])
   yield* agent.awaitRequest("session/prompt"); yield* completePrompt(agent, 2); yield* first.outcome
@@ -1298,7 +828,7 @@ test("submission handles retain their completed record after snapshot retention 
   expect((yield* first.snapshot).status._tag).toBe("completed")
 })))
 
-test("v1 outcome includes updates queued before the prompt response", () => run(Effect.gen(function*() {
+it.effect("v1 outcome includes updates queued before the prompt response", () => run(Effect.gen(function*() {
   const { agent, session } = yield* withSession(1)
   const submission = yield* session.submit([text("hello")])
   yield* agent.awaitRequest("session/prompt")
@@ -1316,7 +846,7 @@ test("v1 outcome includes updates queued before the prompt response", () => run(
   expect(snapshot.messages.flatMap((message) => message.content)).toEqual([text("first "), text("last")])
 })))
 
-test("second v1 turn resets idle state and cancellation waits for its prompt response", () => run(Effect.gen(function*() {
+it.effect("second v1 turn resets idle state and cancellation waits for its prompt response", () => run(Effect.gen(function*() {
   const { agent, session } = yield* withSession(1)
   const first = yield* session.submit([text("first")])
   yield* agent.awaitRequest("session/prompt")
@@ -1342,7 +872,7 @@ test("second v1 turn resets idle state and cancellation waits for its prompt res
 })))
 
 describe("explicit history replay", () => {
-  test("v1 replay uses load even when resume is advertised", () => run(Effect.gen(function*() {
+  it.effect("v1 replay uses load even when resume is advertised", () => run(Effect.gen(function*() {
     const { agent, connection } = yield* harness(1, { agent: {
       version: 1,
       initialize: { protocolVersion: 1, agentCapabilities: { loadSession: true, sessionCapabilities: { resume: {} } } }
@@ -1363,19 +893,19 @@ describe("explicit history replay", () => {
     expect((yield* agent.received).filter(message => message.method === "session/resume")).toHaveLength(0)
   })))
 
-  test("v1 cannot silently omit requested history or downgrade a cursor", () => run(Effect.gen(function*() {
+  it.effect("v1 cannot silently omit requested history or downgrade a cursor", () => run(Effect.gen(function*() {
     const { agent, connection } = yield* harness(1, { agent: {
       version: 1,
       initialize: { protocolVersion: 1, agentCapabilities: { sessionCapabilities: { resume: {} } } }
     } })
     for (const type of ["start", "_cursor"]) {
       const result = yield* Effect.exit(connection.resumeSession({ sessionId: "sess-1", cwd: "/work", replayFrom: { type } }))
-      expect(causeOf(result)).toContain("AcpHistoryUnavailable")
+      expect(failureOf(result)).toMatchObject({ _tag: "AcpHistoryUnavailable" })
     }
     expect((yield* agent.received).filter(message => message.method === "session/resume" || message.method === "session/load")).toHaveLength(0)
   })))
 
-  test("v1 resume without requested history keeps its existing behavior", () => run(Effect.gen(function*() {
+  it.effect("v1 resume without requested history keeps its existing behavior", () => run(Effect.gen(function*() {
     const { agent, connection } = yield* harness(1, { agent: {
       version: 1,
       initialize: { protocolVersion: 1, agentCapabilities: { loadSession: true, sessionCapabilities: { resume: {} } } }

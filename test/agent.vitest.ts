@@ -6,7 +6,7 @@ import * as Json from "../src/internal/json.ts"
  * than with the library's own client: the point is what the agent puts on the
  * socket, not that it agrees with itself.
  */
-import { describe, expect, test } from "bun:test"
+import { describe, expect, it } from "@effect/vitest"
 import * as Context from "effect/Context"
 import * as Clock from "effect/Clock"
 import * as DateTime from "effect/DateTime"
@@ -26,7 +26,7 @@ import * as ProcessStdio from "../src/transport/ProcessStdio.ts"
 import { driver } from "./support/driver.ts"
 
 const run = <A, E>(effect: Effect.Effect<A, E, Scope.Scope | Store.Store>) =>
-  Effect.runPromise(Effect.scoped(effect).pipe(Effect.provide(Store.layer)))
+  Effect.scoped(effect).pipe(Effect.provide(Store.layer))
 
 /** Minimal handlers any test can start from. */
 const baseOptions = (): AcpAgent.Options => ({
@@ -63,13 +63,13 @@ const initialize = (version: 1 | 2, capabilities?: unknown) =>
     }
 
 describe("capability validation", () => {
-  test("safe construction succeeds for a valid configuration", () => {
+  it("safe construction succeeds for a valid configuration", () => {
     const options = baseOptions()
     const agent = Effect.runSync(AcpAgent.make(options))
     expect(agent.options).toBe(options)
   })
 
-  test("safe construction exposes the missing handler as a typed failure", () => {
+  it("safe construction exposes the missing handler as a typed failure", () => {
     const invalid = { ...baseOptions(), prompt: { insert: baseOptions().prompt.insert } } as AcpAgent.Options
     const exit = Effect.runSync(Effect.exit(AcpAgent.make(invalid)))
     expect(exit._tag).toBe("Failure")
@@ -82,7 +82,7 @@ describe("capability validation", () => {
     }
   })
 
-  test("safe construction keeps unexpected validation defects as defects", () => {
+  it("safe construction keeps unexpected validation defects as defects", () => {
     const defect = new Error("broken options getter")
     const options = baseOptions()
     Object.defineProperty(options, "auth", { get: () => { throw defect } })
@@ -93,19 +93,19 @@ describe("capability validation", () => {
     }
   })
 
-  test("unsafe construction throws the original configuration error", () => {
+  it("unsafe construction throws the original configuration error", () => {
     expect(() => AcpAgent.makeUnsafe({ ...baseOptions(), session: {} as never }))
       .toThrow(AcpAgent.AcpAgentConfigError)
   })
 
-  test("advertising sessions without a create handler fails before serving", () => {
+  it("advertising sessions without a create handler fails before serving", () => {
     // Deliberately bypass the public type to exercise validation for JS callers.
     expect(() =>
       AcpAgent.makeUnsafe({ ...baseOptions(), session: {} as never })
     ).toThrow(/session.create/)
   })
 
-  test("advertising authentication methods without a logout handler fails", () => {
+  it("advertising authentication methods without a logout handler fails", () => {
     expect(() =>
       AcpAgent.makeUnsafe({
         ...baseOptions(),
@@ -114,7 +114,7 @@ describe("capability validation", () => {
     ).toThrow(/auth.logout/)
   })
 
-  test("advertising authentication methods without a login handler fails", () => {
+  it("advertising authentication methods without a login handler fails", () => {
     expect(() =>
       AcpAgent.makeUnsafe({
         ...baseOptions(),
@@ -123,11 +123,11 @@ describe("capability validation", () => {
     ).toThrow(/auth.login/)
   })
 
-  test("an empty method list needs no login or logout", () => {
+  it("an empty method list needs no login or logout", () => {
     expect(() => AcpAgent.makeUnsafe({ ...baseOptions(), auth: { methods: [] } })).not.toThrow()
   })
 
-  test("only surfaces with installed handlers are advertised", () =>
+  it.effect("only surfaces with installed handlers are advertised", () =>
     run(Effect.gen(function*() {
       const agent = AcpAgent.makeUnsafe({ ...baseOptions(), session: { create: () => Effect.succeed({ sessionId: "s-1" }) } })
       const peer = yield* connect(agent)
@@ -140,7 +140,7 @@ describe("capability validation", () => {
 })
 
 describe("version negotiation", () => {
-  test("a v1 client gets the v1 advertisement shape", () =>
+  it.effect("a v1 client gets the v1 advertisement shape", () =>
     run(Effect.gen(function*() {
       const peer = yield* connect(AcpAgent.makeUnsafe(baseOptions()))
       yield* peer.send(initialize(1))
@@ -150,7 +150,7 @@ describe("version negotiation", () => {
       expect(field(response, "result.capabilities")).toBeUndefined()
     })))
 
-  test("a version outside the enabled set is answered with our own, not accepted", () =>
+  it.effect("a version outside the enabled set is answered with our own, not accepted", () =>
     run(Effect.gen(function*() {
       const agent = AcpAgent.makeUnsafe({ ...baseOptions(), versions: [1] })
       const peer = yield* connect(agent)
@@ -159,7 +159,7 @@ describe("version negotiation", () => {
       expect(field(response, "result.protocolVersion")).toBe(1)
     })))
 
-  test("requests before initialize are rejected", () =>
+  it.effect("requests before initialize are rejected", () =>
     run(Effect.gen(function*() {
       const peer = yield* connect(AcpAgent.makeUnsafe(baseOptions()))
       yield* peer.send({ jsonrpc: "2.0", id: 1, method: "session/new", params: { cwd: "/tmp" } })
@@ -169,7 +169,7 @@ describe("version negotiation", () => {
 })
 
 describe("prompt insertion and execution", () => {
-  test("v2 answers with the inserted message id and keeps emitting afterwards", () =>
+  it.effect("v2 answers with the inserted message id and keeps emitting afterwards", () =>
     run(Effect.gen(function*() {
       const peer = yield* connect(AcpAgent.makeUnsafe(baseOptions()))
       yield* peer.send(initialize(2))
@@ -199,7 +199,7 @@ describe("prompt insertion and execution", () => {
       expect(frames.indexOf(response)).toBeLessThan(frames.indexOf(idle))
     })))
 
-  test("a prompt whose insertion fails produces no acknowledgement", () =>
+  it.effect("a prompt whose insertion fails produces no acknowledgement", () =>
     run(Effect.gen(function*() {
       let executed = false
       const agent = AcpAgent.makeUnsafe({
@@ -230,7 +230,7 @@ describe("prompt insertion and execution", () => {
       expect(executed).toBe(false)
     })))
 
-  test("v1 waits for the turn and answers with a stop reason", () =>
+  it.effect("v1 waits for the turn and answers with a stop reason", () =>
     run(Effect.gen(function*() {
       const peer = yield* connect(AcpAgent.makeUnsafe(baseOptions()))
       yield* peer.send(initialize(1))
@@ -253,7 +253,7 @@ describe("prompt insertion and execution", () => {
       expect(field(response, "result.messageId")).toBeUndefined()
     })))
 
-  test("prompting an unknown session is rejected", () =>
+  it.effect("prompting an unknown session is rejected", () =>
     run(Effect.gen(function*() {
       const peer = yield* connect(AcpAgent.makeUnsafe(baseOptions()))
       yield* peer.send(initialize(2))
@@ -269,7 +269,7 @@ describe("prompt insertion and execution", () => {
       expect(field(response, "error.message")).toMatch(/Unknown session nope/)
     })))
 
-  test("a handler defect becomes a bare Internal error, leaking no cause", () => {
+  it.effect("a handler defect becomes a bare Internal error, leaking no cause", () => {
     const defect = new Error("database password is hunter2")
     const logs: Array<Logger.Options<unknown>> = []
     const logger = Logger.make<unknown, void>((entry) => { logs.push(entry) })
@@ -293,7 +293,7 @@ describe("prompt insertion and execution", () => {
   })
 })
 
-test("an expected prompt failure logs its original cause before returning refusal", () => {
+it.effect("an expected prompt failure logs its original cause before returning refusal", () => {
   const failure = new AcpAgent.AcpAgentError({ code: -32603, message: "private prompt failure", data: null })
   const logs: Array<Logger.Options<unknown>> = []
   const logger = Logger.make<unknown, void>((entry) => { logs.push(entry) })
@@ -314,7 +314,7 @@ test("an expected prompt failure logs its original cause before returning refusa
   }).pipe(Effect.provide(Logger.layer([logger]))))
 })
 
-test("a private store failure is logged before becoming a bare wire error", () => {
+it.effect("a private store failure is logged before becoming a bare wire error", () => {
   const failure = new Store.StoreError({ kind: "Corrupt", message: "private store secret", cause: new Error("storage stack") })
   const logs: Array<Logger.Options<unknown>> = []
   const logger = Logger.make<unknown, void>((entry) => { logs.push(entry) })
@@ -333,7 +333,7 @@ test("a private store failure is logged before becoming a bare wire error", () =
 })
 
 describe("client interactions", () => {
-  test("a permission request uses the negotiated shape and does not block other traffic", () =>
+  it.effect("a permission request uses the negotiated shape and does not block other traffic", () =>
     run(Effect.gen(function*() {
       const agent = AcpAgent.makeUnsafe({
         ...baseOptions(),
@@ -396,7 +396,7 @@ describe("client interactions", () => {
       expect(field(idle, "params.update.stopReason")).toBe("end_turn")
     })))
 
-  test("an elicitation mode the client never advertised is rejected before sending", () =>
+  it.effect("an elicitation mode the client never advertised is rejected before sending", () =>
     run(Effect.gen(function*() {
       const attempted = Deferred.makeUnsafe<import("effect/Exit").Exit<import("../src/protocol/v2/Schema.ts").CreateElicitationResponse, AcpAgent.HandlerError>>()
       const agent = AcpAgent.makeUnsafe({
@@ -431,7 +431,7 @@ describe("client interactions", () => {
 })
 
 describe("cancellation", () => {
-  test("does not admit a new prompt while cancellation is still finishing", () =>
+  it.effect("does not admit a new prompt while cancellation is still finishing", () =>
     run(Effect.gen(function*() {
       const started = yield* Deferred.make<void>()
       const cancelling = yield* Deferred.make<void>()
@@ -482,7 +482,7 @@ describe("cancellation", () => {
       expect(field(afterCancellation, "result.messageId")).toBe("m-2")
     })))
 
-  test("cancelling a v2 session emits final updates before the cancelled idle state", () =>
+  it.effect("cancelling a v2 session emits final updates before the cancelled idle state", () =>
     run(Effect.gen(function*() {
       const started = Deferred.makeUnsafe<void>()
       const agent = AcpAgent.makeUnsafe({
@@ -525,7 +525,7 @@ describe("cancellation", () => {
     })))
 })
 
-test("serve shutdown closes a session registered after cleanup begins", () =>
+it.effect("serve shutdown closes a session registered after cleanup begins", () =>
   run(Effect.gen(function*() {
     const backing = yield* Store.InMemory
     const lateLookup = yield* Deferred.make<void>()
@@ -601,7 +601,7 @@ test("serve shutdown closes a session registered after cleanup begins", () =>
   })))
 
 describe("store-backed replay", () => {
-  test("records each message's first real time across chunks and replacements, then replays in that order", () =>
+  it.effect("records each message's first real time across chunks and replacements, then replays in that order", () =>
     run(Effect.gen(function*() {
       const store = yield* Store.Store
       const liveClock = yield* Clock.Clock
@@ -665,7 +665,7 @@ describe("store-backed replay", () => {
       expect(replayed).toEqual(["backfill", "prompt", "agent", "thought", "user"])
     })))
 
-  test("replay preserves the message id and resets content before appending chunks", () =>
+  it.effect("replay preserves the message id and resets content before appending chunks", () =>
     run(Effect.gen(function*() {
       const store = yield* Effect.service(Store.Store)
       const agent = AcpAgent.makeUnsafe({
@@ -715,7 +715,7 @@ describe("store-backed replay", () => {
       expect(updates.indexOf(full)).toBeLessThan(updates.indexOf(chunk))
     })))
 
-  test("a full message replacement is refused on v1, which has no message identities", () =>
+  it.effect("a full message replacement is refused on v1, which has no message identities", () =>
     run(Effect.gen(function*() {
       const outcome = Deferred.makeUnsafe<import("effect/Exit").Exit<void, AcpAgent.HandlerError>>()
       const agent = AcpAgent.makeUnsafe({
@@ -741,7 +741,7 @@ describe("store-backed replay", () => {
       expect(field(exit, "_tag")).toBe("Failure")
     })))
 
-  test("session/list is advertised and answered only when enabled", () =>
+  it.effect("session/list is advertised and answered only when enabled", () =>
     run(Effect.gen(function*() {
       const peer = yield* connect(AcpAgent.makeUnsafe({ ...baseOptions(), list: true }))
       yield* peer.send(initialize(2))
@@ -753,7 +753,7 @@ describe("store-backed replay", () => {
       expect(field(response, "result.sessions")).toEqual([{ sessionId: "s-1", cwd: "/tmp", title: null, updatedAt: null }])
     })))
 
-  test("v2 session/list is part of the baseline even without an optional list flag", () =>
+  it.effect("v2 session/list is part of the baseline even without an optional list flag", () =>
     run(Effect.gen(function*() {
       const peer = yield* connect(AcpAgent.makeUnsafe(baseOptions()))
       yield* peer.send(initialize(2))
@@ -768,10 +768,13 @@ describe("process stdio serving", () => {
   const decode = (chunk: string | Uint8Array) => typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk)
 
   /** A `Stdio` layer over fixed stdin bytes that captures stdout and stderr. */
-  const testStdio = (input: string) => {
+  const testStdio = (input: string, written: Deferred.Deferred<void>) => {
     const out: Array<string> = []
     const err: Array<string> = []
-    const into = (buffer: Array<string>) => Sink.forEach((chunk: string | Uint8Array) => Effect.sync(() => buffer.push(decode(chunk))))
+    const into = (buffer: Array<string>) => Sink.forEach((chunk: string | Uint8Array) => Effect.gen(function*() {
+      buffer.push(decode(chunk))
+      if (buffer === out && out.join("").includes("\n")) yield* Deferred.succeed(written, undefined)
+    }))
     const layer = Layer.succeed(
       Stdio.Stdio,
       Stdio.make({
@@ -784,11 +787,13 @@ describe("process stdio serving", () => {
     return { out, err, layer }
   }
 
-  test("stdout carries only ACP frames and diagnostics go to stderr", () =>
+  it.effect("stdout carries only ACP frames and diagnostics go to stderr", () =>
     run(Effect.gen(function*() {
+      const written = yield* Deferred.make<void>()
       const { err, layer, out } = testStdio(
         `${(yield* Json.encode(initialize(2)))}\n` +
-          `${(yield* Json.encode({ jsonrpc: "2.0", id: 1, method: "session/new", params: { cwd: "/tmp" } }))}\n`
+          `${(yield* Json.encode({ jsonrpc: "2.0", id: 1, method: "session/new", params: { cwd: "/tmp" } }))}\n`,
+        written
       )
       const agent = AcpAgent.makeUnsafe(baseOptions())
       yield* Effect.provide(
@@ -796,7 +801,7 @@ describe("process stdio serving", () => {
           yield* ProcessStdio.diagnostic("starting up")
           const transport = yield* ProcessStdio.make()
           yield* Effect.forkScoped(Effect.ignore(agent.serve.pipe(Effect.provideService(AcpTransport, transport))))
-          yield* Effect.sleep("200 millis")
+          yield* Deferred.await(written)
         }),
         layer
       )
@@ -815,7 +820,7 @@ describe("author dependencies", () => {
   }>()("test/Greeter") {}
   const GreeterLayer = Layer.succeed(Greeter, Greeter.of({ greet: (name) => `hello ${name}` }))
 
-  test("a handler's own services stay in the agent's requirements and are provided at serve time", () =>
+  it.effect("a handler's own services stay in the agent's requirements and are provided at serve time", () =>
     run(Effect.gen(function*() {
       // `R` is inferred from the handlers, not declared: the agent needs Greeter.
       const agent = AcpAgent.makeUnsafe({
@@ -838,7 +843,7 @@ describe("author dependencies", () => {
     })))
 })
 
-test("v1 session cancellation interrupts the owned turn and returns cancelled after final updates", () => run(Effect.gen(function*() {
+it.effect("v1 session cancellation interrupts the owned turn and returns cancelled after final updates", () => run(Effect.gen(function*() {
   const started = yield* Deferred.make<void>()
   const agent = AcpAgent.makeUnsafe({ ...baseOptions(), prompt: {
     insert: () => Effect.succeed({ messageId: "m" }),
@@ -858,7 +863,7 @@ test("v1 session cancellation interrupts the owned turn and returns cancelled af
 })))
 
 for (const method of ["session/close", "session/delete"] as const) {
-  test(`v1 in-flight prompt completes as cancelled during ${method}`, () => run(Effect.gen(function*() {
+  it.effect(`v1 in-flight prompt completes as cancelled during ${method}`, () => run(Effect.gen(function*() {
     const started = yield* Deferred.make<void>()
     const agent = AcpAgent.makeUnsafe({ ...baseOptions(), session: {
       create: () => Effect.succeed({ sessionId: "s-1" }),
@@ -882,7 +887,7 @@ for (const method of ["session/close", "session/delete"] as const) {
   })))
 }
 
-test("v1 close does not turn an interruption-time defect into cancellation", () => run(Effect.gen(function*() {
+it.effect("v1 close does not turn an interruption-time defect into cancellation", () => run(Effect.gen(function*() {
   const started = yield* Deferred.make<void>()
   const agent = AcpAgent.makeUnsafe({ ...baseOptions(), session: {
     create: () => Effect.succeed({ sessionId: "s-1" }),
@@ -907,7 +912,7 @@ test("v1 close does not turn an interruption-time defect into cancellation", () 
   ]))
 })))
 
-test("store appends chunks without losing previous chunks or replacement content", () => run(Effect.gen(function*() {
+it.effect("store appends chunks without losing previous chunks or replacement content", () => run(Effect.gen(function*() {
   const store = yield* Store.Store
   yield* store.create({ sessionId: "s", cwd: "/tmp" })
   const message = { sessionId: "s", messageId: "m", role: "agent" as const, recordedAt: DateTime.makeUnsafe("2026-01-01T00:00:00Z") }
@@ -918,7 +923,7 @@ test("store appends chunks without losing previous chunks or replacement content
   expect(retained!.chunks).toEqual([{ type: "text", text: "one" }, { type: "text", text: "two" }])
 })))
 
-test("store orders first recordings by time, keeps equal-time insertion order, and scopes ids by session", () => run(Effect.gen(function*() {
+it.effect("store orders first recordings by time, keeps equal-time insertion order, and scopes ids by session", () => run(Effect.gen(function*() {
   const store = yield* Store.Store
   const at = (millis: number) => DateTime.makeUnsafe(millis)
   yield* store.create({ sessionId: "one", cwd: "/tmp" })

@@ -1,10 +1,10 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, it } from "@effect/vitest"
 import * as Result from "effect/Result"
 import * as Json from "../src/internal/json.ts"
 import * as JsonRpc from "../src/internal/jsonRpc.ts"
 
 describe("JSON-RPC envelope schemas", () => {
-  test("preserves null IDs, structured params, absent params, and null results", () => {
+  it("preserves null IDs, structured params, absent params, and null results", () => {
     expect(JsonRpc.classify({ jsonrpc: "2.0", id: null, method: "test", params: null }))
       .toEqual({ _tag: "Request", id: null, method: "test", params: null })
     expect(JsonRpc.classify({ jsonrpc: "2.0", method: "test", params: [1] }))
@@ -17,7 +17,7 @@ describe("JSON-RPC envelope schemas", () => {
       .toMatchObject({ _tag: "ErrorResponse", error: { code: -1, message: "failed", data: null } })
   })
 
-  test("rejects invalid requests while keeping malformed responses distinguishable", () => {
+  it("rejects invalid requests while keeping malformed responses distinguishable", () => {
     for (const value of [null, [], { jsonrpc: "1.0", method: "test" },
       { jsonrpc: "2.0", method: 1 }, { jsonrpc: "2.0", method: "test", params: false },
       { jsonrpc: "2.0", method: "test", id: 1.5 }]) {
@@ -32,7 +32,7 @@ describe("JSON-RPC envelope schemas", () => {
     ]) expect(JsonRpc.classify(value)._tag).toBe("InvalidResponse")
   })
 
-  test("JSON failures remain Results instead of escaping as exceptions", () => {
+  it("JSON failures remain Results instead of escaping as exceptions", () => {
     const circular: Record<string, unknown> = {}
     circular.self = circular
     expect(Result.isFailure(Json.decodeResult("{broken"))).toBe(true)
