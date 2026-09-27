@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test"
+import { expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Scope from "effect/Scope"
@@ -7,8 +7,8 @@ import * as AcpConnection from "../src/AcpConnection.ts"
 import { AcpTransportError } from "../src/AcpError.ts"
 import { AcpTransport } from "../src/AcpTransport.ts"
 
-test("transport failure settles pending requests even when its scope closes during termination", () =>
-  Effect.runPromise(Effect.gen(function*() {
+it.effect("transport failure settles pending requests even when its scope closes during termination", () =>
+  Effect.gen(function*() {
     let failWrites = false
     const transport = AcpTransport.of({
       incoming: Stream.never,
@@ -33,4 +33,4 @@ test("transport failure settles pending requests even when its scope closes duri
     yield* Effect.yieldNow
     expect(lastWaiter.pollUnsafe()).toBeDefined()
     expect(closedWaiter.pollUnsafe()).toBeDefined()
-  })))
+  }))
