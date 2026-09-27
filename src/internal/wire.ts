@@ -14,14 +14,6 @@ import * as Schema from "effect/Schema"
 export const def = <T>(identifier: string, schema: Schema.Codec<T>): Schema.Codec<T> =>
   schema.annotate({ identifier })
 
-/**
- * JSON Schema `allOf` and `not` filter values at runtime, but their TypeScript
- * result is broader than the intersection/refinement emitted from the source.
- * The generator uses this cast only for definitions containing those keywords.
- */
-export const refinedDef = <T>(identifier: string, schema: Schema.Codec<unknown>): Schema.Codec<T> =>
-  schema.annotate({ identifier }) as Schema.Codec<T>
-
 /** JSON Schema `integer`: any finite number without a fractional part. */
 export const integer = Schema.Finite.check(
   Schema.makeFilter((n: number) => Number.isInteger(n), { expected: "an integer" })
@@ -37,12 +29,24 @@ export const object = <const Fields extends Schema.Struct.Fields>(fields: Fields
 /** JSON Schema object whose keys are all constrained by `additionalProperties`. */
 export const record = <A>(value: Schema.Codec<A>) => Schema.Record(Schema.String, value)
 
-/** JSON Schema `allOf`: the first member decodes, the others must also accept the input. */
-export const allOf = <A>(first: Schema.Codec<A>, ...rest: ReadonlyArray<Schema.Codec<unknown>>): Schema.Codec<A> =>
+type Intersection<Members extends ReadonlyArray<Schema.Codec<unknown>>> =
+  Members extends readonly [infer First extends Schema.Codec<unknown>, ...infer Rest extends ReadonlyArray<Schema.Codec<unknown>>]
+    ? Schema.Schema.Type<First> & Intersection<Rest>
+    : unknown
+
+/**
+ * JSON Schema `allOf`: each member validates the same identity-decoded input.
+ * Effect's `check` keeps the first codec's type, so the cast exposes the
+ * intersection established by the remaining successful validations.
+ */
+export const allOf = <A, const Rest extends ReadonlyArray<Schema.Codec<unknown>>>(
+  first: Schema.Codec<A>,
+  ...rest: Rest
+): Schema.Codec<A & Intersection<Rest>> =>
   rest.reduce<Schema.Codec<A>>((result, member) => result.check(Schema.makeFilter((input: unknown) => {
     const decoded = Schema.decodeUnknownResult(member)(input)
     return Result.isSuccess(decoded) ? undefined : decoded.failure.issue
-  })), first)
+  })), first) as Schema.Codec<A & Intersection<Rest>>
 
 /** JSON Schema `not`: the input must not satisfy `excluded`. */
 export const not = <A>(base: Schema.Codec<A>, excluded: Schema.Codec<unknown>): Schema.Codec<A> => {

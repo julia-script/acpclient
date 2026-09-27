@@ -824,7 +824,7 @@ export type ContentBlock = (({
    */
   readonly type: string
 })
-export const ContentBlock = Wire.refinedDef<ContentBlock>("ContentBlock", Schema.Union([
+export const ContentBlock = Wire.def<ContentBlock>("ContentBlock", Schema.Union([
   Wire.allOf(
     Wire.object({
       type: Schema.Literal("text")
@@ -1051,7 +1051,7 @@ export type AvailableCommandInput = (({
    */
   readonly type: string
 })
-export const AvailableCommandInput = Wire.refinedDef<AvailableCommandInput>("AvailableCommandInput", Schema.Union([
+export const AvailableCommandInput = Wire.def<AvailableCommandInput>("AvailableCommandInput", Schema.Union([
   Wire.allOf(
     Wire.object({
       type: Schema.Literal("text")
@@ -1309,7 +1309,7 @@ export type SessionConfigOption = ({
    */
   readonly type: string
 }))
-export const SessionConfigOption = Wire.refinedDef<SessionConfigOption>("SessionConfigOption", Wire.allOf(
+export const SessionConfigOption = Wire.def<SessionConfigOption>("SessionConfigOption", Wire.allOf(
   Wire.object({
     configId: SessionConfigId,
     name: Schema.String,
@@ -1523,7 +1523,7 @@ export type PlanUpdateContent = (({
    */
   readonly planId: PlanId
 })
-export const PlanUpdateContent = Wire.refinedDef<PlanUpdateContent>("PlanUpdateContent", Schema.Union([
+export const PlanUpdateContent = Wire.def<PlanUpdateContent>("PlanUpdateContent", Schema.Union([
   Wire.allOf(
     Wire.object({
       type: Schema.Literal("items")
@@ -1703,7 +1703,7 @@ export type StateUpdate = (({
    */
   readonly state: string
 })
-export const StateUpdate = Wire.refinedDef<StateUpdate>("StateUpdate", Schema.Union([
+export const StateUpdate = Wire.def<StateUpdate>("StateUpdate", Schema.Union([
   Wire.allOf(
     Wire.object({
       state: Schema.Literal("running")
@@ -2000,7 +2000,7 @@ export type DiffChange = ({
    */
   readonly operation: string
 }))
-export const DiffChange = Wire.refinedDef<DiffChange>("DiffChange", Wire.allOf(
+export const DiffChange = Wire.def<DiffChange>("DiffChange", Wire.allOf(
   Wire.object({
     fileType: Schema.optionalKey(Schema.Union([
       DiffFileType,
@@ -2187,7 +2187,7 @@ export type ToolCallContent = (({
    */
   readonly type: string
 })
-export const ToolCallContent = Wire.refinedDef<ToolCallContent>("ToolCallContent", Schema.Union([
+export const ToolCallContent = Wire.def<ToolCallContent>("ToolCallContent", Schema.Union([
   Wire.allOf(
     Wire.object({
       type: Schema.Literal("content")
@@ -2571,7 +2571,7 @@ export type SessionUpdate = (({
    */
   readonly sessionUpdate: string
 })
-export const SessionUpdate = Wire.refinedDef<SessionUpdate>("SessionUpdate", Schema.Union([
+export const SessionUpdate = Wire.def<SessionUpdate>("SessionUpdate", Schema.Union([
   Wire.allOf(
     Wire.object({
       sessionUpdate: Schema.Literal("user_message_chunk")
@@ -3006,7 +3006,7 @@ export type MultiSelectItems = (({
    */
   readonly type: string
 }) | (TitledMultiSelectItems)
-export const MultiSelectItems = Wire.refinedDef<MultiSelectItems>("MultiSelectItems", Schema.Union([
+export const MultiSelectItems = Wire.def<MultiSelectItems>("MultiSelectItems", Schema.Union([
   Wire.allOf(
     Wire.object({
       type: Schema.Literal("string")
@@ -3266,7 +3266,7 @@ export type ElicitationPropertySchema = (({
    */
   readonly type: string
 })
-export const ElicitationPropertySchema = Wire.refinedDef<ElicitationPropertySchema>("ElicitationPropertySchema", Schema.Union([
+export const ElicitationPropertySchema = Wire.def<ElicitationPropertySchema>("ElicitationPropertySchema", Schema.Union([
   Wire.allOf(
     Wire.object({
       type: Schema.Literal("string")
@@ -3417,7 +3417,7 @@ export type ElicitationFormMode = ({
    */
   readonly requestedSchema: ElicitationSchema
 }) & ((ElicitationSessionScope) | (ElicitationRequestScope))
-export const ElicitationFormMode = Wire.refinedDef<ElicitationFormMode>("ElicitationFormMode", Wire.allOf(
+export const ElicitationFormMode = Wire.def<ElicitationFormMode>("ElicitationFormMode", Wire.allOf(
   Wire.object({
     requestedSchema: ElicitationSchema
   }),
@@ -3440,7 +3440,7 @@ export type ElicitationUrlMode = ({
    */
   readonly url: string
 }) & ((ElicitationSessionScope) | (ElicitationRequestScope))
-export const ElicitationUrlMode = Wire.refinedDef<ElicitationUrlMode>("ElicitationUrlMode", Wire.allOf(
+export const ElicitationUrlMode = Wire.def<ElicitationUrlMode>("ElicitationUrlMode", Wire.allOf(
   Wire.object({
     elicitationId: ElicitationId,
     url: Schema.String
@@ -3487,7 +3487,7 @@ export type CreateElicitationRequest = ({
    */
   readonly mode: string
 }) & ((ElicitationSessionScope) | (ElicitationRequestScope))))
-export const CreateElicitationRequest = Wire.refinedDef<CreateElicitationRequest>("CreateElicitationRequest", Wire.allOf(
+export const CreateElicitationRequest = Wire.def<CreateElicitationRequest>("CreateElicitationRequest", Wire.allOf(
   Wire.object({
     message: Schema.String,
     _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
@@ -3662,7 +3662,7 @@ export type RequestPermissionSubject = (({
    */
   readonly type: string
 })
-export const RequestPermissionSubject = Wire.refinedDef<RequestPermissionSubject>("RequestPermissionSubject", Schema.Union([
+export const RequestPermissionSubject = Wire.def<RequestPermissionSubject>("RequestPermissionSubject", Schema.Union([
   Wire.allOf(
     Wire.object({
       type: Schema.Literal("tool_call")
@@ -4029,7 +4029,7 @@ export type AuthMethod = (({
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 })
-export const AuthMethod = Wire.refinedDef<AuthMethod>("AuthMethod", Schema.Union([
+export const AuthMethod = Wire.def<AuthMethod>("AuthMethod", Schema.Union([
   Wire.allOf(
     Wire.object({
       type: Schema.Literal("terminal")
@@ -4974,7 +4974,7 @@ export type McpServer = (({
    */
   readonly type: string
 })
-export const McpServer = Wire.refinedDef<McpServer>("McpServer", Schema.Union([
+export const McpServer = Wire.def<McpServer>("McpServer", Schema.Union([
   Wire.allOf(
     Wire.object({
       type: Schema.Literal("http")
@@ -5125,7 +5125,7 @@ export type ReplayFrom = (({
    */
   readonly _meta?: { readonly [key: string]: unknown } | null
 })
-export const ReplayFrom = Wire.refinedDef<ReplayFrom>("ReplayFrom", Schema.Union([
+export const ReplayFrom = Wire.def<ReplayFrom>("ReplayFrom", Schema.Union([
   Wire.allOf(
     Wire.object({
       type: Schema.Literal("start")
@@ -5248,7 +5248,7 @@ export type SetSessionConfigOptionRequest = ({
    */
   readonly value: unknown
 }))
-export const SetSessionConfigOptionRequest = Wire.refinedDef<SetSessionConfigOptionRequest>("SetSessionConfigOptionRequest", Wire.allOf(
+export const SetSessionConfigOptionRequest = Wire.def<SetSessionConfigOptionRequest>("SetSessionConfigOptionRequest", Wire.allOf(
   Wire.object({
     sessionId: SessionId,
     configId: SessionConfigId,
@@ -5373,7 +5373,7 @@ export type CreateElicitationResponse = ({
    */
   readonly action: string
 }))
-export const CreateElicitationResponse = Wire.refinedDef<CreateElicitationResponse>("CreateElicitationResponse", Wire.allOf(
+export const CreateElicitationResponse = Wire.def<CreateElicitationResponse>("CreateElicitationResponse", Wire.allOf(
   Wire.object({
     _meta: Schema.optionalKey(Schema.Union([Wire.object({}), Schema.Null]))
   }),
@@ -5448,7 +5448,7 @@ export type RequestPermissionOutcome = ({
    */
   readonly outcome: string
 })
-export const RequestPermissionOutcome = Wire.refinedDef<RequestPermissionOutcome>("RequestPermissionOutcome", Schema.Union([
+export const RequestPermissionOutcome = Wire.def<RequestPermissionOutcome>("RequestPermissionOutcome", Schema.Union([
   Wire.object({
     outcome: Schema.Literal("cancelled")
   }),

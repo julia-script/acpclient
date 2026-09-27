@@ -96,7 +96,7 @@ describe("generation", () => {
     expect(Result.isSuccess(emit({}))).toBe(true)
   })
 
-  it("reserves the type cast for allOf and not refinements, including nested ones", () => {
+  it("keeps definitions strict around allOf and not, including nested ones", () => {
     const result = emit({
       Plain: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
       Intersected: { allOf: [{ type: "object", properties: { id: { type: "string" } } }, { type: "object", properties: { name: { type: "string" } } }] },
@@ -107,8 +107,9 @@ describe("generation", () => {
     if (Result.isFailure(result)) throw result.failure
     expect(result.success).toContain('export const Plain = Wire.def<Plain>("Plain", Wire.object({')
     for (const name of ["Intersected", "Negated", "Nested"]) {
-      expect(result.success).toContain(`export const ${name} = Wire.refinedDef<${name}>("${name}", `)
+      expect(result.success).toContain(`export const ${name} = Wire.def<${name}>("${name}", `)
     }
+    expect(result.success).not.toContain("Wire.refinedDef")
   })
 
   it("schema names and property keys never resolve through prototypes", () => {

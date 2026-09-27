@@ -8,10 +8,18 @@ const ordinary = Wire.def<{ readonly id: string; readonly note?: string }>("Ordi
   note: Schema.optionalKey(Schema.String)
 }))
 const withExtra = { id: "x", extra: true }
+const mismatchedIntersection = Wire.allOf(
+  Wire.object({ message: Schema.Finite }),
+  Wire.object({ mode: Schema.Literal("url") })
+)
 
 describe("generated wire codec types", () => {
   it("links ordinary definitions and preserves open, readonly, optional objects", () => {
     expect(Schema.Finite).type.not.toBeAssignableTo<Parameters<typeof Wire.def<{ readonly id: string }>>[1]>()
+    expect(mismatchedIntersection).type.not.toBeAssignableTo<Parameters<typeof Wire.def<{
+      readonly message: string
+      readonly mode: "url"
+    }>>[1]>()
     expect(ordinary).type.toBeAssignableTo<Schema.Codec<{ readonly id: string; readonly note?: string }>>()
     expect(withExtra).type.toBeAssignableTo<Schema.Schema.Type<typeof ordinary>>()
     expect({ id: "x", note: undefined }).type.toBeAssignableTo<Schema.Schema.Type<typeof ordinary>>()
