@@ -12,7 +12,7 @@ export const version = 1 as const
 export class GatewayError extends Schema.TaggedError<GatewayError>()("AcpGatewayError", {
   code: Schema.Literals(["UnsupportedVersion", "Unauthorized", "HostRestarted", "NotFound", "Conflict", "StaleController", "WindowExpired", "Capacity", "ResyncRequired", "Closed", "Invalid", "AgentFailure", "OutcomeUnknown"]),
   message: Schema.String
-}) {}
+}, { identifier: "effect-acp/AcpGateway/GatewayError" }) {}
 export const failure = (code: GatewayError["code"]): GatewayError => new GatewayError({ code, message: code })
 export const Identity = Schema.Struct({ principalId: Schema.String })
 export type Identity = typeof Identity.Type

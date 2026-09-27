@@ -104,7 +104,9 @@ const safe = (cause: Cause.Cause<unknown>) => {
       case "AcpCapabilityUnsupported": return new Errors.AcpCapabilityUnsupported({ operation: error.operation, version: error.version })
       case "AcpSessionBusy": return new Errors.AcpSessionBusy({ message: "Session has foreground work" })
       case "AcpHistoryUnavailable": return new Errors.AcpHistoryUnavailable({ sessionId: error.sessionId, operation: error.operation })
-      default: return error
+      case "AcpInteractionAlreadyResolved":
+      case "AcpInteractionExpired": return error
+      default: return error satisfies never
     }
   }
   return typeof error === "object" && error !== null && "_tag" in error && (error._tag === "AcpConnectionClosed" || error._tag === "AcpTimeoutError") ? AcpGateway.failure("OutcomeUnknown") : AcpGateway.failure("AgentFailure")

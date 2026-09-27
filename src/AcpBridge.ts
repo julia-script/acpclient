@@ -42,7 +42,7 @@ export class AcpBridgeClosed extends Schema.TaggedError<AcpBridgeClosed>()("AcpB
   message: Schema.String,
   side: Schema.optional(Schema.String),
   cause: Schema.optional(Schema.Defect())
-}) {}
+}, { identifier: "effect-acp/AcpBridge/AcpBridgeClosed" }) {}
 
 /** Default time a single write may stay blocked before the bridge fails. */
 export const defaultPressureDeadline: Duration.Duration = Duration.seconds(10)

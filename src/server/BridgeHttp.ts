@@ -53,7 +53,7 @@ export class Rejected extends Schema.TaggedError<Rejected>()("BridgeHttpRejected
   message: Schema.String,
   /** Which boundary refused the request: `profile`, `origin`, `auth`, or `launch`. */
   reason: Schema.optional(Schema.String)
-}) {}
+}, { identifier: "effect-acp/server/BridgeHttp/Rejected" }) {}
 
 export interface Options<A, AuthR = never, LaunchR = never> {
   /** Path to mount the upgrade route on. Default `/acp`. */
