@@ -30,6 +30,7 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
+    "erasableSyntaxOnly": true,
 
     // Additional strictness
     "noUnusedLocals": true,
