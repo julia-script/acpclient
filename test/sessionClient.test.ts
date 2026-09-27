@@ -82,6 +82,8 @@ for (const version of [1, 2] as const) {
     yield* agent.awaitRequest("session/prompt")
     yield* completePrompt(agent, version)
     expect((yield* submission.outcome).status).toEqual({ _tag: "completed" })
+    yield* session.release
+    expect((yield* submission.outcome).status).toEqual({ _tag: "completed" })
     yield* Scope.close(owner, Exit.void)
     expect((yield* submission.outcome).status).toEqual({ _tag: "completed" })
     if (version === 1) expect(causeOf(yield* Effect.exit(submission.accepted))).toContain("AcpCapabilityUnsupported")
@@ -167,6 +169,18 @@ test("v2 accepted remains successful when ownership ends before the turn complet
   expect(yield* submission.accepted).toBe("accepted")
   yield* Scope.close(owner, Exit.void)
   expect(causeOf(yield* Fiber.join(outcome))).toContain("AcpConnectionClosed")
+})))
+
+test("v2 accepted remains successful after explicit session release", () => run(Effect.gen(function*() {
+  const { agent, session } = yield* withSession(2)
+  const submission = yield* session.submit([text("held")])
+  const outcome = yield* Effect.exit(submission.outcome).pipe(Effect.forkChild)
+  yield* agent.awaitRequest("session/prompt")
+  yield* agent.respond("session/prompt", { messageId: "accepted" })
+  expect(yield* submission.accepted).toBe("accepted")
+  yield* session.release
+  expect(yield* submission.accepted).toBe("accepted")
+  expect(causeOf(yield* Fiber.join(outcome).pipe(Effect.timeout("200 millis")))).toContain("AcpConnectionClosed")
 })))
 
 /** Drives a submission to completion the way its protocol does. */

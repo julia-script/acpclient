@@ -632,14 +632,20 @@ const connect = Effect.fnUntraced(function*(options: ConnectOptions) {
             submissionId: (yield* runtime.current).activeSubmissionId ?? undefined
           })
         }
-        return yield* dispatch(prompt).pipe(
+        let permitHeld = true
+        const releasePermit = Effect.uninterruptible(Effect.suspend(() => {
+          if (!permitHeld) return Effect.void
+          permitHeld = false
+          return Semaphore.release(foreground, 1)
+        }))
+        return yield* dispatch(prompt, releasePermit).pipe(
           // The permit is held until the submission settles, not until the
           // call returns: the session stays busy for the whole turn.
-          Effect.tapCause(() => Semaphore.release(foreground, 1))
+          Effect.tapCause(() => releasePermit)
         )
       }).pipe(Effect.forkIn(sessionScope), Effect.flatMap(Fiber.join)))
 
-    const dispatch = (prompt: Parameters<AcpSession["submit"]>[0]) =>
+    const dispatch = (prompt: Parameters<AcpSession["submit"]>[0], releasePermit: Effect.Effect<void>) =>
       Effect.gen(function*() {
         const id = localId("submission")
         const record: SubmissionSnapshot = {
@@ -713,7 +719,7 @@ const connect = Effect.fnUntraced(function*(options: ConnectOptions) {
               latest = snapshot.submissions[id] ?? { ...latest, prompt: [], status: { _tag: "failed", failure: toFailure(error) } }
             }))
           }),
-          Effect.ensuring(Semaphore.release(foreground, 1)))
+          Effect.ensuring(releasePermit))
 
         yield* Effect.forkIn(settle, sessionScope, { startImmediately: true })
 
