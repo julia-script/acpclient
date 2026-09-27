@@ -56,6 +56,7 @@
     "@effect/vitest": "4.0.0-rc.115",
     "@types/bun": "latest",
     "ajv": "^8",
+    "effect": "4.0.0-rc.115",
     "oxlint": "1.82.0",
     "oxlint-tsgolint": "7.0.2001",
     "tstyche": "7.2.5",
@@ -63,9 +64,6 @@
     "vitest": "5.0.0"
   },
   "peerDependencies": {
-    "typescript": "^7"
-  },
-  "dependencies": {
     "effect": "4.0.0-rc.115"
   },
   "main": "./dist/index.js",
