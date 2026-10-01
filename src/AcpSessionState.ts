@@ -1,7 +1,7 @@
 import type { InteractionOutcome } from "./AcpApp.ts"
 import * as V1 from "./protocol/v1/Schema.ts"
 import * as Result from "effect/Result"
-import * as Encoding from "effect/Encoding"
+import * as Base64 from "effect/encoding/Base64"
 import * as Schema from "effect/Schema"
 import * as Json from "./internal/json.ts"
 /**
@@ -156,7 +156,7 @@ const decodeBase64 = (data: string): ReadonlyArray<number> => {
   // switching to Effect's result-based decoder.
   const stripped = data.replace(/[ \t\n\f\r]/g, "")
   const padded = stripped.includes("=") ? stripped : stripped.padEnd(stripped.length + (4 - stripped.length % 4) % 4, "=")
-  const decoded = Encoding.decodeBase64(padded)
+  const decoded = Base64.decode(padded)
   // An undecodable chunk contributes no bytes; the raw record keeps it observable.
   return Result.isSuccess(decoded) ? Array.from(decoded.success) : []
 }

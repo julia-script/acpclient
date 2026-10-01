@@ -1,12 +1,12 @@
-import * as Argument from "effect/unstable/cli/Argument"
-import * as Command from "effect/unstable/cli/Command"
+import * as Argument from "effect/cli/Argument"
+import * as Command from "effect/cli/Command"
 import * as BunHttpServer from "@effect/platform-bun/BunHttpServer"
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
-import * as HttpRouter from "effect/unstable/http/HttpRouter"
-import * as ChildProcess from "effect/unstable/process/ChildProcess"
+import * as HttpRouter from "effect/http/HttpRouter"
+import * as ChildProcess from "effect/process/ChildProcess"
 import * as BridgeHttp from "effect-acp/server/BridgeHttp"
 
 export const bridgeServer = (command: ChildProcess.Command, port = 8317) => {

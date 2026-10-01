@@ -1,9 +1,9 @@
 import { describe, expect, it } from "tstyche"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
-import * as ChildProcess from "effect/unstable/process/ChildProcess"
-import type { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
-import type * as HttpRouter from "effect/unstable/http/HttpRouter"
+import * as ChildProcess from "effect/process/ChildProcess"
+import type { ChildProcessSpawner } from "effect/process/ChildProcessSpawner"
+import type * as HttpRouter from "effect/http/HttpRouter"
 import * as BridgeHttp from "../src/server/BridgeHttp.ts"
 
 class AuthService extends Context.Service<AuthService, { readonly principal: string }>()("test/AuthService") {}

@@ -21,8 +21,8 @@ Save this as `real-agent.ts`. It takes an executable followed by its arguments, 
 
 <!-- example: ../examples/real-agent.ts -->
 ```ts
-import * as Argument from "effect/unstable/cli/Argument"
-import * as Command from "effect/unstable/cli/Command"
+import * as Argument from "effect/cli/Argument"
+import * as Command from "effect/cli/Command"
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as Config from "effect/Config"
@@ -37,7 +37,7 @@ import { AcpClient } from "effect-acp/AcpClient"
 import * as AcpConnector from "effect-acp/AcpConnector"
 import * as AcpLocalClient from "effect-acp/AcpLocalClient"
 import * as Stdio from "effect-acp/transport/Stdio"
-import * as ChildProcess from "effect/unstable/process/ChildProcess"
+import * as ChildProcess from "effect/process/ChildProcess"
 
 const clientLayer = (command: ChildProcess.Command) => AcpLocalClient.layer.pipe(
   Layer.provide(AcpConnector.layer(Stdio.layer(
@@ -123,7 +123,7 @@ if (import.meta.main) {
 
 ## Command-line arguments
 
-The example uses Effect 4's `effect/unstable/cli` for typed argument parsing, help, and validation. Run `bun real-agent.ts --help` to inspect the wrapper's usage. The first positional argument is the executable; subsequent positional arguments belong to that executable. Put agent flags after `--` so the wrapper does not interpret them as its own flags. The separator itself is not forwarded.
+The example uses Effect 4's `effect/cli` for typed argument parsing, help, and validation. Run `bun real-agent.ts --help` to inspect the wrapper's usage. The first positional argument is the executable; subsequent positional arguments belong to that executable. Put agent flags after `--` so the wrapper does not interpret them as its own flags. The separator itself is not forwarded.
 
 For example, with the tutorial's `echo-agent.ts` in the current directory:
 

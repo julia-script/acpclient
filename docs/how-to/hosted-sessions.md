@@ -10,8 +10,8 @@ Save this as `hosted-server.ts`. Install the packages from [the real-agent guide
 
 <!-- example: ../examples/hosted-server.ts -->
 ```ts
-import * as Argument from "effect/unstable/cli/Argument"
-import * as Command from "effect/unstable/cli/Command"
+import * as Argument from "effect/cli/Argument"
+import * as Command from "effect/cli/Command"
 import * as BunHttpServer from "@effect/platform-bun/BunHttpServer"
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
@@ -19,8 +19,8 @@ import * as Config from "effect/Config"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Layer from "effect/Layer"
-import * as HttpRouter from "effect/unstable/http/HttpRouter"
-import * as ChildProcess from "effect/unstable/process/ChildProcess"
+import * as HttpRouter from "effect/http/HttpRouter"
+import * as ChildProcess from "effect/process/ChildProcess"
 import { AcpClient } from "effect-acp/AcpClient"
 import * as AcpConnector from "effect-acp/AcpConnector"
 import * as AcpGateway from "effect-acp/AcpGateway"
@@ -153,7 +153,7 @@ Save the following as `hosted-reconnect.ts` and run it from another terminal wit
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
-import * as Socket from "effect/unstable/socket/Socket"
+import * as Socket from "effect/socket/Socket"
 import * as AcpGatewayClient from "effect-acp/AcpGatewayClient"
 import { openHostedSession } from "./hosted-client.ts"
 

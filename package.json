@@ -50,13 +50,13 @@
     "prepack": "bun run build"
   },
   "devDependencies": {
-    "@effect/platform-bun": "4.0.0-rc.115",
-    "@effect/platform-node": "4.0.0-rc.115",
-    "@effect/tsgo": "0.45.0",
-    "@effect/vitest": "4.0.0-rc.115",
+    "@effect/platform-bun": "4.0.0",
+    "@effect/platform-node": "4.0.0",
+    "@effect/tsgo": "0.47.2",
+    "@effect/vitest": "4.0.0",
     "@types/bun": "latest",
     "ajv": "^8",
-    "effect": "4.0.0-rc.115",
+    "effect": "4.0.0",
     "oxlint": "1.82.0",
     "oxlint-tsgolint": "7.0.2001",
     "tstyche": "7.2.5",
@@ -64,7 +64,7 @@
     "vitest": "5.0.0"
   },
   "peerDependencies": {
-    "effect": "4.0.0-rc.115"
+    "effect": "4.0.0"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

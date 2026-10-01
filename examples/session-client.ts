@@ -1,7 +1,7 @@
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime"
 import * as Option from "effect/Option"
-import * as Argument from "effect/unstable/cli/Argument"
-import * as Command from "effect/unstable/cli/Command"
+import * as Argument from "effect/cli/Argument"
+import * as Command from "effect/cli/Command"
 import * as AcpConnector from "effect-acp/AcpConnector"
 import * as V1 from "effect-acp/protocol/v1"
 import * as Schema from "effect/Schema"
@@ -43,7 +43,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Stream from "effect/Stream"
-import * as ChildProcess from "effect/unstable/process/ChildProcess"
+import * as ChildProcess from "effect/process/ChildProcess"
 import { AcpClient, AcpLocalClient, Stdio } from "effect-acp"
 
 // The application supplies the process runtime; the library imports none.

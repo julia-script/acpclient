@@ -24,7 +24,7 @@ const hasText = (session: { readonly messages: ReadonlyArray<{ readonly content:
 const withSession = (
   version: 1 | 2,
   options: Parameters<typeof harness>[1] = {}
-): Effect.Effect<Harness & { readonly session: AcpSession }, OperationError | ConnectError | import("effect/unstable/rpc/RpcClientError").RpcClientError, Scope.Scope> =>
+): Effect.Effect<Harness & { readonly session: AcpSession }, OperationError | ConnectError | import("effect/rpc/RpcClientError").RpcClientError, Scope.Scope> =>
   Effect.gen(function*() {
     const open = yield* harness(version, options)
     const session = yield* open.connection.newSession({ cwd: "/work" })

@@ -15,7 +15,7 @@ import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as TestClock from "effect/testing/TestClock"
-import * as Socket from "effect/unstable/socket/Socket"
+import * as Socket from "effect/socket/Socket"
 import * as WebSocket from "../src/transport/WebSocket.ts"
 
 type Listener = (event: Socket.WebSocketEvent) => void

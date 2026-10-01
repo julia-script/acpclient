@@ -1,7 +1,7 @@
 import * as Effect from "effect/Effect"
 import { AcpClient } from "effect-acp/AcpClient"
 import * as Layer from "effect/Layer"
-import * as Socket from "effect/unstable/socket/Socket"
+import * as Socket from "effect/socket/Socket"
 import * as AcpConnector from "effect-acp/AcpConnector"
 import * as AcpLocalClient from "effect-acp/AcpLocalClient"
 import * as WebSocket from "effect-acp/transport/WebSocket"
