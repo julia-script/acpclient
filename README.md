@@ -3,10 +3,10 @@
 Effect-native clients and agent authoring for the [Agent Client Protocol](https://agentclientprotocol.com). Add agent sessions to an application with schema-validated messages, streaming snapshots, permission handling, and scoped resource ownership.
 
 ```sh
-bun add effect-acp effect@4.0.0-rc.115
+bun add effect-acp effect@4.0.0
 ```
 
-Examples use Effect 4.0.0-rc.115. Terminal applications also install the matching `@effect/platform-bun` or `@effect/platform-node` package. ACP v1 is the default; the v2 draft is an explicit opt-in.
+Examples use Effect 4.0.0. Terminal applications also install the matching `@effect/platform-bun` or `@effect/platform-node` package. ACP v1 is the default; the v2 draft is an explicit opt-in.
 
 [Start with a complete agent session](docs/tutorials/first-session.md), or [connect to Claude or Codex](docs/how-to/real-agents.md).
 

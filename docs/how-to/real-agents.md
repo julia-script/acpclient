@@ -9,7 +9,7 @@ The executables here are ACP adapters. Install them explicitly; ordinary `claude
 In your application directory:
 
 ```sh
-bun add effect-acp effect@4.0.0-rc.115 @effect/platform-bun@4.0.0-rc.115
+bun add effect-acp effect@4.0.0 @effect/platform-bun@4.0.0
 bun add --dev @agentclientprotocol/claude-agent-acp@0.79.0 @agentclientprotocol/codex-acp@1.12.0
 ```
 
