@@ -3,7 +3,7 @@ import { expect, it } from "@effect/vitest"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
-import * as ChildProcess from "effect/unstable/process/ChildProcess"
+import * as ChildProcess from "effect/process/ChildProcess"
 import { AcpClient } from "../src/AcpClient.ts"
 import * as Host from "../src/AcpHost.ts"
 import * as GC from "../src/AcpGatewayClient.ts"
@@ -24,7 +24,7 @@ const harness = Effect.gen(function*() {
   const connection = yield* remote.connect({ versions: [2], params: { info: { name: "test", version: "1" } } })
   return { connection, gateway }
 })
-const run = <A,E>(effect: Effect.Effect<A,E,import("effect/Scope").Scope | import("effect/unstable/process/ChildProcessSpawner").ChildProcessSpawner>) => Effect.scoped(effect).pipe(Effect.provide(BunServices.layer), Effect.timeout("10 seconds"))
+const run = <A,E>(effect: Effect.Effect<A,E,import("effect/Scope").Scope | import("effect/process/ChildProcessSpawner").ChildProcessSpawner>) => Effect.scoped(effect).pipe(Effect.provide(BunServices.layer), Effect.timeout("10 seconds"))
 
 it.live("a real subprocess crash records outcomeUnknown and terminates connection waits", () => run(Effect.gen(function*() {
   const h = yield* harness

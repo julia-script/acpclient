@@ -1,8 +1,8 @@
 import { McpServer, ElicitationContent, SessionListEntry } from "./AcpApp.ts"
 /** Package-owned application protocol. This is not an ACP transport. */
 import * as Schema from "effect/Schema"
-import * as Rpc from "effect/unstable/rpc/Rpc"
-import * as RpcGroup from "effect/unstable/rpc/RpcGroup"
+import * as Rpc from "effect/rpc/Rpc"
+import * as RpcGroup from "effect/rpc/RpcGroup"
 import * as AcpSessionError from "./AcpSessionError.ts"
 import * as V1 from "./protocol/v1/Schema.ts"
 import * as V2 from "./protocol/v2/Schema.ts"

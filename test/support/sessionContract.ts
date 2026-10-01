@@ -27,7 +27,7 @@ export const harness = (
     readonly agent?: Parameters<typeof scriptedAgent>[0]
     readonly connect?: Partial<ConnectOptions>
   } = {}
-): Effect.Effect<Harness, ConnectError | import("effect/unstable/rpc/RpcClientError").RpcClientError, Scope.Scope> =>
+): Effect.Effect<Harness, ConnectError | import("effect/rpc/RpcClientError").RpcClientError, Scope.Scope> =>
   Effect.gen(function*() {
     const agent = yield* scriptedAgent({ version, ...options.agent })
     const client = yield* Effect.provide(

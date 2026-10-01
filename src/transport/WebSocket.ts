@@ -20,7 +20,7 @@ import * as Layer from "effect/Layer"
 import * as Queue from "effect/Queue"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
-import * as Socket from "effect/unstable/socket/Socket"
+import * as Socket from "effect/socket/Socket"
 import { AcpTransportError } from "../AcpError.ts"
 import { AcpTransport, type Transport } from "../AcpTransport.ts"
 

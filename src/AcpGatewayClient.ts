@@ -7,9 +7,9 @@ import * as Deferred from "effect/Deferred"
 import * as Schedule from "effect/Schedule"
 import * as Scope from "effect/Scope"
 import * as Layer from "effect/Layer"
-import * as RpcClient from "effect/unstable/rpc/RpcClient"
-import * as RpcSerialization from "effect/unstable/rpc/RpcSerialization"
-import * as Socket from "effect/unstable/socket/Socket"
+import * as RpcClient from "effect/rpc/RpcClient"
+import * as RpcSerialization from "effect/rpc/RpcSerialization"
+import * as Socket from "effect/socket/Socket"
 import * as Schema from "effect/Schema"
 import * as AcpGateway from "./AcpGateway.ts"
 
@@ -42,7 +42,7 @@ export const memoryStorage = (): Storage => {
     remove: (key) => Effect.sync(() => { values.delete(key) })
   }
 }
-type RpcApi = RpcClient.FromGroup<typeof AcpGateway.Gateway, import("effect/unstable/rpc/RpcClientError").RpcClientError>
+type RpcApi = RpcClient.FromGroup<typeof AcpGateway.Gateway, import("effect/rpc/RpcClientError").RpcClientError>
 // Gateway operations always await replies and consume attachment Streams. The
 // transport client's discard/asQueue overloads are not part of this interface.
 const responseApi = (client: RpcApi) => ({

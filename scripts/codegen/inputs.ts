@@ -2,7 +2,7 @@
 import * as Crypto from "effect/Crypto"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
-import * as Encoding from "effect/Encoding"
+import * as Hex from "effect/encoding/Hex"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import * as Schema from "effect/Schema"
@@ -31,7 +31,7 @@ export const loadManifest = (file = manifestPath) => Effect.gen(function*() {
 })
 export const sha256 = (bytes: Uint8Array) => Effect.gen(function*() {
   const crypto = yield* Crypto.Crypto
-  return Encoding.encodeHex(yield* crypto.digest("SHA-256", bytes))
+  return Hex.encode(yield* crypto.digest("SHA-256", bytes))
 })
 export class InputHashMismatch extends Data.TaggedError("InputHashMismatch")<{
   readonly path: string; readonly expected: string; readonly actual: string; readonly message: string
