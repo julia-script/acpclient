@@ -7,6 +7,8 @@ import * as Option from "effect/Option"
 /**
  * `AcpClient` over a direct `AcpConnector` transport.
  *
+ * **Details**
+ *
  * This module owns everything the pure reducer deliberately does not: event
  * ordering, publication, request correlation, interaction fibers, and
  * resource bounds. The rules it enforces are the ones that are impossible to
@@ -22,7 +24,6 @@ import * as Option from "effect/Option"
  * - Observers get bounded delivery; falling behind fails that observer with
  *   `AcpSubscriptionOverflow` rather than growing memory without bound or
  *   stalling the reader.
- *
  */
 import * as Cause from "effect/Cause"
 import * as Deferred from "effect/Deferred"
@@ -1046,7 +1047,11 @@ const encodeResolution = (
   }
 }
 
-/** `AcpClient` implemented over `AcpConnector`. */
+/**
+ * `AcpClient` implemented over `AcpConnector`.
+ *
+ * @category layers
+ */
 export const layer: Layer.Layer<AcpClient, never, AcpConnector> = Layer.effect(
   AcpClient,
   Effect.map(AcpConnector, (connector) =>

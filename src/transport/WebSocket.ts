@@ -1,6 +1,8 @@
 /**
  * ACP over a WebSocket using the custom `effect-acp-jsonrpc-v1` profile.
  *
+ * **Details**
+ *
  * Each WebSocket message carries one complete UTF-8 JSON frame; there is no
  * stdio newline delimiter. The profile versions framing only: it is negotiated
  * independently of the ACP protocol version (v1 or v2), so the same connection
@@ -11,7 +13,6 @@
  * `Socket` (see `server/BridgeHttp`). Sockets are never reconnected implicitly
  * and frames are never resent after loss: a socket failure or scope release is
  * terminal for the transport.
- *
  */
 import * as Cause from "effect/Cause"
 import type * as Duration from "effect/Duration"
@@ -24,22 +25,47 @@ import * as Socket from "effect/socket/Socket"
 import { AcpTransportError } from "../AcpError.ts"
 import { AcpTransport, type Transport } from "../AcpTransport.ts"
 
-/** The WebSocket subprotocol this adapter negotiates. */
+/**
+ * The WebSocket subprotocol this adapter negotiates.
+ *
+ * @category constants
+ */
 export const profile = "effect-acp-jsonrpc-v1"
 
-/** Close code sent when a binary frame is received (Unsupported Data). */
+/**
+ * Close code sent when a binary frame is received (Unsupported Data).
+ *
+ * @category constants
+ */
 export const unsupportedDataClose = 1003
-/** Close code sent when a text frame exceeds the size limit (Message Too Big). */
+/**
+ * Close code sent when a text frame exceeds the size limit (Message Too Big).
+ *
+ * @category constants
+ */
 export const tooLargeClose = 1009
 
+/**
+ * Frame size, inbound buffering, and socket opening and pressure settings.
+ *
+ * @category configuration
+ */
 export interface Options {
-  /** Largest text frame accepted or sent, in bytes. Default 16 MiB. */
+  /**
+   * Largest text frame accepted or sent, in bytes. Default 16 MiB.
+   */
   readonly maxFrameBytes?: number | undefined
-  /** Frames buffered before reading pauses. Default 64. */
+  /**
+   * Frames buffered before reading pauses. Default 64.
+   */
   readonly buffer?: number | undefined
-  /** How long to wait for the socket to open. Passed to `Socket.fromWebSocket`. */
+  /**
+   * How long to wait for the socket to open. Passed to `Socket.fromWebSocket`.
+   */
   readonly openTimeout?: Duration.Input | undefined
-  /** Buffered bytes before a non-pausing socket fails. Passed to `Socket.fromWebSocket`. */
+  /**
+   * Buffered bytes before a non-pausing socket fails. Passed to `Socket.fromWebSocket`.
+   */
   readonly highWaterMark?: number | undefined
 }
 
@@ -54,7 +80,11 @@ const isClose = (error: Socket.SocketError): boolean => error.reason._tag === "S
 const describe = (error: Socket.SocketError): string =>
   error.reason._tag === "SocketCloseError" ? `Socket closed (${error.reason.code})` : error.message
 
-/** Parses a `Sec-WebSocket-Protocol` header and reports the profile amongst its offers. */
+/**
+ * Parses a `Sec-WebSocket-Protocol` header and reports the profile amongst its offers.
+ *
+ * @category predicates
+ */
 export const requested = (headers: Readonly<Record<string, string | undefined>>): boolean => {
   const header = headers["sec-websocket-protocol"]
   if (header === undefined) return false
@@ -62,9 +92,24 @@ export const requested = (headers: Readonly<Record<string, string | undefined>>)
 }
 
 /**
- * Adapts an Effect `Socket` to an `Transport`. Used by the server side for
- * an already-upgraded socket and by `make` for a dialled one. The socket is
- * acquired once and held for the transport's lifetime, so no reconnect occurs.
+ * Adapts an Effect socket acquisition to a scoped ACP frame transport.
+ *
+ * **When to use**
+ *
+ * Use when the application already owns an upgraded socket or supplies a custom socket acquisition.
+ *
+ * **Details**
+ *
+ * Acquires the socket once and holds it for the transport lifetime. Socket acquisition failures
+ * become transport Open errors; read and write failures become transport errors.
+ *
+ * **Gotchas**
+ *
+ * Binary messages are rejected with close code 1003. Oversized incoming text frames are rejected
+ * with close code 1009. No reconnection or frame replay occurs.
+ *
+ * @see {@link make} for dialing a URL with the required subprotocol.
+ * @category constructors
  */
 export const fromSocket = <E, R>(
   socket: Effect.Effect<Socket.Socket, E, R>,
@@ -155,9 +200,10 @@ export const fromSocket = <E, R>(
   })
 
 /**
- * Dials `url` with the required subprotocol and returns a scoped transport.
- * The connection is opened once; a missing/mismatched subprotocol, socket
- * failure, or scope release is terminal.
+ * Dials `url` with the required subprotocol and returns a scoped transport. The connection is
+ * opened once; a missing/mismatched subprotocol, socket failure, or scope release is terminal.
+ *
+ * @category constructors
  */
 export const make = <E = never, R = never>(
   url: string | Effect.Effect<string, E, R>,
@@ -242,13 +288,21 @@ const selected = (ws: Socket.WebSocketLike): Effect.Effect<Socket.WebSocketLike,
   ))
 }
 
-/** A scoped WebSocket implementation of AcpTransport. */
+/**
+ * A scoped WebSocket implementation of AcpTransport.
+ *
+ * @category layers
+ */
 export const layer = <E = never, R = never>(
   url: string | Effect.Effect<string, E, R>,
   options?: Options
 ): Layer.Layer<AcpTransport, AcpTransportError | E, Socket.WebSocketConstructor | Exclude<R, Scope.Scope>> =>
   Layer.effect(AcpTransport, make(url, options))
 
-/** Uses an injected accepted socket, e.g. after an HTTP upgrade. */
+/**
+ * Uses an injected accepted socket, e.g. after an HTTP upgrade.
+ *
+ * @category layers
+ */
 export const layerSocket = (options?: Options): Layer.Layer<AcpTransport, AcpTransportError, Socket.Socket> =>
   Layer.effect(AcpTransport, fromSocket(Socket.Socket, options))

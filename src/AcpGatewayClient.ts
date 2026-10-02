@@ -1,5 +1,7 @@
 import { randomUUID } from "./internal/crypto.ts"
-/** Browser-safe gateway connection with application-provided refresh storage. */
+/**
+ * Browser-safe gateway connection with application-provided refresh storage.
+ */
 import * as Effect from "effect/Effect"
 import * as Clock from "effect/Clock"
 import * as Semaphore from "effect/Semaphore"
@@ -13,16 +15,53 @@ import * as Socket from "effect/socket/Socket"
 import * as Schema from "effect/Schema"
 import * as AcpGateway from "./AcpGateway.ts"
 
-/** Implement using browser storage or another application-controlled store. */
+/**
+ * Application-owned persistence for gateway identity, admissions, and retained session data.
+ *
+ * **When to use**
+ *
+ * Use when gateway recovery must survive a page refresh or client reconstruction.
+ *
+ * **Details**
+ *
+ * Return `undefined` from `load` for a missing key. Complete `save` only after the value is
+ * available to subsequent loads; admissions are saved before the first network write. Storage keys
+ * are namespaced by client options.
+ *
+ * @see {@link memoryStorage} for storage that lasts only for one instance.
+ * @category models
+ */
 export interface Storage<SaveError = AcpGateway.GatewayError> {
+  /**
+   * Reads a retained value, returning undefined when the key has no value.
+   */
   readonly load: (key: string) => Effect.Effect<unknown>
+  /**
+   * Persists a value before any admission depending on it is written to the network.
+   */
   readonly save: (key: string, value: unknown) => Effect.Effect<void, SaveError>
+  /**
+   * Removes retained local state without cancelling host-side work.
+   */
   readonly remove: (key: string) => Effect.Effect<void>
 }
 class StorageCloneFailure extends Schema.TaggedError<StorageCloneFailure>()("StorageCloneFailure", {
   cause: Schema.Defect()
 }) {}
 
+/**
+ * Creates application storage backed by an in-memory map.
+ *
+ * **Details**
+ *
+ * Values are cloned when saved. State survives only while this storage instance remains reachable.
+ *
+ * **Gotchas**
+ *
+ * Non-cloneable values fail with gateway code `Invalid`.
+ *
+ * @category constructors
+ */
 export const memoryStorage = (): Storage => {
   const values = new Map<string, unknown>()
   return {
@@ -53,8 +92,51 @@ const responseApi = (client: RpcApi) => ({
   Closed: (input: Parameters<RpcApi["Closed"]>[0]) => client.Closed(input),
   Attach: (input: Parameters<RpcApi["Attach"]>[0]) => client.Attach(input)
 })
+/**
+ * Response-oriented gateway RPC calls and the session attachment stream.
+ *
+ * @category models
+ */
 export type Api = ReturnType<typeof responseApi>
-export interface Options<SaveError = AcpGateway.GatewayError> { readonly workspace: string; readonly storage: Storage<SaveError>; readonly storageKey?: string; readonly disconnected?: Effect.Effect<void> }
+/**
+ * Workspace, persistence adapter, storage namespace, and disconnection signal for a gateway client.
+ *
+ * @category configuration
+ */
+export interface Options<SaveError = AcpGateway.GatewayError> {
+  /**
+   * Workspace included in the gateway handshake and command admission window.
+   */
+  readonly workspace: string
+  /**
+   * Application-owned persistence for identity, admissions, and session recovery.
+   */
+  readonly storage: Storage<SaveError>
+  /**
+   * Storage namespace prefix. Defaults to `effect-acp:` followed by the workspace.
+   */
+  readonly storageKey?: string
+  /**
+   * Signal that the connection is lost. Defaults to an effect that never completes.
+   */
+  readonly disconnected?: Effect.Effect<void>
+}
+/**
+ * Creates a gateway client from application-supplied RPC calls and persistence.
+ *
+ * **Details**
+ *
+ * Restores or creates a client identity, performs `Hello` , and persists admissions before writing
+ * them to the network. `retry` first queries the retained operation before attempting admission
+ * again.
+ *
+ * **Gotchas**
+ *
+ * `wait` polls until an operation leaves `admitted` ; callers needing a deadline must apply one.
+ * Forgetting an operation removes local recovery data and does not cancel host work.
+ *
+ * @category constructors
+ */
 export const fromApi = <SaveError>(api: Api, options: Options<SaveError>) => Effect.gen(function*() {
   const prefix = options.storageKey ?? `effect-acp:${options.workspace}`
   const saved = yield* options.storage.load(`${prefix}:identity`)
@@ -106,9 +188,42 @@ export const fromApi = <SaveError>(api: Api, options: Options<SaveError>) => Eff
     command: (command: AcpGateway.Command, generation?: number) => submit(command, generation).pipe(Effect.filterOrElse((op) => op.status !== "admitted", (op) => wait(op.operationId))) }
 })
 const importSchemaAdmission = (value: unknown) => Schema.decodeUnknownEffect(AcpGateway.Admission)(value).pipe(Effect.mapError(() => AcpGateway.failure("Invalid")))
+/**
+ * Gateway client with persisted command admissions, explicit recovery, and result polling.
+ *
+ * **Details**
+ *
+ * - `submit` persists an admission before sending and returns its current operation state.
+ * - `wait` polls the operation's original window until it leaves `admitted`.
+ * - `command` combines submission with waiting; a failed operation is returned as data.
+ * - `retry` looks up retained work before reusing the saved admission.
+ * - `pendingOperations` lists locally retained operation identities; `forget` removes recovery data.
+ * - `renew` obtains and persists a fresh admission window, exposed through `window`.
+ * - `api` exposes direct RPC calls; `clientId`, `prefix`, and `storage` identify the retained client state.
+ * - `disconnected` signals transport loss independently of command outcomes.
+ *
+ * **Gotchas**
+ *
+ * A retained pending identity is not proof that the host is still running the operation. Forgetting
+ * local state does not cancel host work. Apply a deadline to unbounded waits when needed.
+ *
+ * @see {@link fromApi} for acquisition and persistence behavior.
+ * @category models
+ */
 export type Client<SaveError = AcpGateway.GatewayError> = Effect.Success<ReturnType<typeof fromApi<SaveError>>>
+/**
+ * Creates a gateway client using the injected Effect RPC protocol and application storage.
+ *
+ * @see {@link fromApi} for supplying RPC calls directly.
+ *
+ * @category constructors
+ */
 export const make = <SaveError>(options: Options<SaveError>) => Effect.flatMap(RpcClient.make(AcpGateway.Gateway), (api) => fromApi(responseApi(api), options))
-/** One socket lifetime; reconnection is explicit and never resends ACP commands. */
+/**
+ * One socket lifetime; reconnection is explicit and never resends ACP commands.
+ *
+ * @category running
+ */
 export const connect = <SaveError>(url: string, options: Options<SaveError>) => Effect.gen(function*() {
   const scope = yield* Scope.Scope
   const disconnected = yield* Deferred.make<void>()

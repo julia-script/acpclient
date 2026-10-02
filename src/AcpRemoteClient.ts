@@ -1,5 +1,7 @@
 import { randomUUID } from "./internal/crypto.ts"
-/** AcpClient implementation over the package-owned gateway (never raw ACP). */
+/**
+ * AcpClient implementation over the package-owned gateway (never raw ACP).
+ */
 import * as Cause from "effect/Cause"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
@@ -17,13 +19,39 @@ import * as AcpGateway from "./AcpGateway.ts"
 import type { Client } from "./AcpGatewayClient.ts"
 import { AcpCapabilityUnsupported, AcpSessionBusy, AcpSubscriptionOverflow } from "./AcpSessionError.ts"
 
+/**
+ * Host launch profile, profile arguments, observer capacity, and retained connection namespace.
+ *
+ * **Details**
+ *
+ * Observer capacity defaults to 256. `connectionKey` distinguishes independent connections to the
+ * same profile.
+ *
+ * @category configuration
+ */
 export interface Options {
+  /**
+   * Authorized host launch profile to open through gateway admission.
+   */
   readonly profile: string
+  /**
+   * Application-defined profile arguments sent to the host resolver.
+   */
   readonly profileOptions?: unknown
+  /**
+   * Frames buffered for each observer before it must resynchronize. Defaults to 256.
+   */
   readonly observerCapacity?: number
-  /** Distinguishes multiple connections to the same launch profile. */
+  /**
+   * Distinguishes multiple connections to the same launch profile.
+   */
   readonly connectionKey?: string
 }
+/**
+ * Hosted session metadata used to attach to a retained agent session.
+ *
+ * @category models
+ */
 export type SessionDescriptor = AcpGateway.SessionDescriptor
 const RetainedSession = Schema.UndefinedOr(Schema.Struct({ cursor: AcpGateway.Cursor, snapshot: SessionSnapshot }))
 const RetainedConnection = Schema.UndefinedOr(Schema.Struct({ epoch: Schema.String, descriptor: Schema.optionalKey(AcpGateway.ConnectionDescriptor), operationId: Schema.String }))
@@ -31,6 +59,22 @@ const network = <A, E, R>(effect: Effect.Effect<A, E, R>) => effect.pipe(Effect.
   (error): error is Extract<E, { _tag: "RpcClientError" }> => typeof error === "object" && error !== null && "_tag" in error && error._tag === "RpcClientError",
   () => Effect.fail(AcpGateway.failure("Closed"))))
 
+/**
+ * Creates a remote application client over an established gateway client.
+ *
+ * **Details**
+ *
+ * Returns connection operations, scoped attachment acquisition, and descriptor lookup for returned
+ * session handles. Attachments restore retained snapshots and cursors without reinitializing ACP or
+ * resubmitting prompts.
+ *
+ * **Gotchas**
+ *
+ * Observer capacity must be a positive safe integer. A changed host epoch rejects retained
+ * connections with `HostRestarted` . Attachment takeover can revoke the previous controller.
+ *
+ * @category constructors
+ */
 export const make = (gateway: Client, options: Options) => Effect.gen(function*() {
   const capacity = options.observerCapacity ?? 256
   if (!Number.isSafeInteger(capacity) || capacity <= 0) return yield* AcpGateway.failure("Invalid")
@@ -39,7 +83,9 @@ export const make = (gateway: Client, options: Options) => Effect.gen(function*(
   const run = (command: AcpGateway.Command, generation?: number): Effect.Effect<unknown, AcpGateway.CommandError> =>
     network(gateway.command(command, generation)).pipe(Effect.flatMap((op) => op.error ? Effect.fail(op.error) : Effect.succeed(op.result)))
 
-  /** Reattaches retained state without ACP initialize/resume or resubmitting a prompt. */
+  /**
+   * Reattaches retained state without ACP initialize/resume or resubmitting a prompt.
+   */
   const acquire = (descriptor: SessionDescriptor, takeover: boolean, cacheKey: string, token: symbol): Effect.Effect<AcpSession, AcpGateway.GatewayError, Scope.Scope> => Effect.gen(function*() {
     const owned = yield* Scope.fork(yield* Scope.Scope)
     yield* Scope.addFinalizer(owned, Effect.sync(() => {
@@ -268,4 +314,13 @@ export const make = (gateway: Client, options: Options) => Effect.gen(function*(
   })
   return { connect, attach, descriptor: (session: AcpSession): SessionDescriptor | undefined => descriptors.get(session) }
 })
+/**
+ * Provides the application client service through a gateway connection.
+ *
+ * **Details**
+ *
+ * The gateway client and its socket lifetime must be supplied by the application.
+ *
+ * @category layers
+ */
 export const layer = (gateway: Client, options: Options) => Layer.effect(AcpClient, make(gateway, options))

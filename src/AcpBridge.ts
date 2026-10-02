@@ -1,6 +1,8 @@
 /**
  * Transparent relay between two framed ACP transports.
  *
+ * **Details**
+ *
  * `AcpBridge` forwards complete frames between a browser/remote transport and
  * a peer (typically a spawned stdio agent) without interpreting them: request
  * IDs, method payloads, response errors, notifications, batches, and extension
@@ -19,7 +21,6 @@
  * The bridge is scoped. Closing the enclosing scope terminates both pumps and
  * completes `closed`; the bridge never reconnects or resends and never claims
  * session recovery after connection loss.
- *
  */
 import * as Cause from "effect/Cause"
 import * as Deferred from "effect/Deferred"
@@ -34,39 +35,77 @@ import * as Stream from "effect/Stream"
 import type { AcpTransportError } from "./AcpError.ts"
 import type { Transport } from "./AcpTransport.ts"
 
-/** Which side ended first, when a side is the trigger. */
+/**
+ * Which side ended first, when a side is the trigger.
+ *
+ * @category models
+ */
 export type BridgeSide = "browser" | "peer"
 
-/** The bridge released its owned transports. Reported once through `closed`. */
+/**
+ * The bridge released its owned transports. Reported once through `closed`.
+ *
+ * @category errors
+ */
 export class AcpBridgeClosed extends Schema.TaggedError<AcpBridgeClosed>()("AcpBridgeClosed", {
   message: Schema.String,
   side: Schema.optional(Schema.String),
   cause: Schema.optional(Schema.Defect())
 }, { identifier: "effect-acp/AcpBridge/AcpBridgeClosed" }) {}
 
-/** Default time a single write may stay blocked before the bridge fails. */
+/**
+ * Default forwarding write deadline of ten seconds.
+ *
+ * @category constants
+ */
 export const defaultPressureDeadline: Duration.Duration = Duration.seconds(10)
 
+/**
+ * Transport endpoints, their shared release effect, and the forwarding pressure deadline.
+ *
+ * @category configuration
+ */
 export interface Options {
-  /** The remote/browser end. Its `incoming` frames are forwarded to `peer`. */
+  /**
+   * The remote/browser end. Its `incoming` frames are forwarded to `peer`.
+   */
   readonly browser: Transport
-  /** The spawned/owned end. Its `incoming` frames are forwarded to `browser`. */
+  /**
+   * The spawned/owned end. Its `incoming` frames are forwarded to `browser`.
+   */
   readonly peer: Transport
   /**
-   * Closes both owned transports. Runs exactly once, uninterruptibly, when
-   * either side ends or the deadline elapses. Must be idempotent.
+   * Closes both owned transports. Runs exactly once, uninterruptibly, when either side ends or the
+   * deadline elapses. Must be idempotent.
    */
   readonly release: Effect.Effect<void>
-  /** Maximum time a forward write may be blocked. Default 10 seconds. */
+  /**
+   * Maximum time a forward write may be blocked. Default 10 seconds.
+   */
   readonly pressureDeadline?: Duration.Input | undefined
 }
 
+/**
+ * Scoped frame relay with an explicit termination command and an observable closure reason.
+ *
+ * @category models
+ */
 export interface AcpBridge {
+  /**
+   * Browser-facing framed transport supplied by the caller.
+   */
   readonly browser: Transport
+  /**
+   * Agent-facing framed transport supplied by the caller.
+   */
   readonly peer: Transport
-  /** Completes with the reason the bridge closed and released its transports. */
+  /**
+   * Completes with the reason the bridge closed and released its transports.
+   */
   readonly closed: Effect.Effect<AcpBridgeClosed>
-  /** Explicitly closes the bridge; the reason is reported through `closed`. */
+  /**
+   * Explicitly closes the bridge; the reason is reported through `closed`.
+   */
   readonly terminate: (message?: string, side?: BridgeSide) => Effect.Effect<void>
 }
 
@@ -103,7 +142,11 @@ const forward = (
     })
   )
 
-/** Opens a bridge over two transports owned by the caller. */
+/**
+ * Opens a bridge over two transports owned by the caller.
+ *
+ * @category constructors
+ */
 export const make = (options: Options): Effect.Effect<AcpBridge, never, Scope.Scope> =>
   Effect.gen(function*() {
     const scope = yield* Scope.Scope

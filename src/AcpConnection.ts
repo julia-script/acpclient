@@ -3,11 +3,12 @@ import * as Json from "./internal/json.ts"
 /**
  * Role-neutral ACP JSON-RPC peer over the `AcpTransport` service.
  *
+ * **Details**
+ *
  * Either side may send requests and notifications while others are pending.
  * Responses correlate by ID per direction, so an incoming and an outgoing
  * request may share an ID. Incoming requests run in their own scoped fibers;
  * incoming notifications are handled one at a time in arrival order.
- *
  */
 import * as Context from "effect/Context"
 import * as Layer from "effect/Layer"
@@ -39,26 +40,45 @@ import * as JsonRpc from "./internal/jsonRpc.ts"
 // Incoming handlers
 // -----------------------------------------------------------------------------
 
+/**
+ * Remote request identity supplied to an incoming request handler.
+ *
+ * @category models
+ */
 export interface RequestContext {
-  /** The remote peer's ID for this request. */
+  /**
+   * The remote peer's ID for this request.
+   */
   readonly id: RequestId
 }
 
 /**
- * Raw incoming dispatch. Returning `undefined` means the method is not
- * supported: requests receive Method not found, notifications are ignored.
- * A request handler fails with `AcpRemoteError` to send that error; defects
- * become Internal error responses without their details.
+ * Raw incoming dispatch. Returning `undefined` means the method is not supported: requests receive
+ * Method not found, notifications are ignored. A request handler fails with `AcpRemoteError` to
+ * send that error; defects become Internal error responses without their details.
+ *
+ * @category models
  */
 export interface Handlers {
+  /**
+   * Dispatches an incoming request; undefined means the method is unsupported.
+   */
   readonly request?: (
     method: string,
     params: unknown,
     context: RequestContext
   ) => Effect.Effect<unknown, AcpRemoteError> | undefined
+  /**
+   * Dispatches an incoming notification; undefined means it is ignored.
+   */
   readonly notification?: (method: string, params: unknown) => Effect.Effect<void> | undefined
 }
 
+/**
+ * Decoded request or notification route used to build incoming dispatch.
+ *
+ * @category models
+ */
 export type Route =
   | {
     readonly _tag: "Request"
@@ -67,7 +87,22 @@ export type Route =
   }
   | { readonly _tag: "Notification"; readonly method: string; readonly run: (params: unknown) => Effect.Effect<void> }
 
-/** Handles a declared request method: params are decoded and the result encoded with its codecs. */
+/**
+ * Creates an incoming request route that decodes parameters and encodes the handler's result.
+ *
+ * **Details**
+ *
+ * The handler receives decoded parameters and the remote request identity. Its typed
+ * `AcpRemoteError` is sent to the peer.
+ *
+ * **Gotchas**
+ *
+ * Invalid parameters produce an Invalid params response. A result that fails encoding produces an
+ * Internal error response.
+ *
+ * @see {@link handlers} for combining routes into incoming dispatch.
+ * @category routing
+ */
 export const onRequest = <D extends RequestMethod>(
   method: D,
   handler: (params: Params<D>, context: RequestContext) => Effect.Effect<Result<D>, AcpRemoteError>
@@ -86,7 +121,11 @@ export const onRequest = <D extends RequestMethod>(
     )
 })
 
-/** Handles a declared notification method. Notifications with invalid params are dropped and logged. */
+/**
+ * Handles a declared notification method. Notifications with invalid params are dropped and logged.
+ *
+ * @category routing
+ */
 export const onNotification = <D extends NotificationMethod>(
   method: D,
   handler: (params: Params<D>) => Effect.Effect<void>
@@ -102,7 +141,22 @@ export const onNotification = <D extends NotificationMethod>(
     )
 })
 
-/** Combines routes, optionally falling back to raw handlers (e.g. for extension methods). */
+/**
+ * Combines typed routes with optional raw fallback handlers.
+ *
+ * **Details**
+ *
+ * Fallback dispatch is used only when no route matches the method and message kind.
+ *
+ * **Gotchas**
+ *
+ * When multiple routes share the same method and kind, the last one wins. A matched route that
+ * fails validation does not fall back.
+ *
+ * @see {@link onRequest} for request parameter decoding and result encoding.
+ * @see {@link onNotification} for notification parameter decoding.
+ * @category routing
+ */
 export const handlers = (routes: ReadonlyArray<Route>, fallback?: Handlers): Handlers => {
   const requests = new Map<string, Extract<Route, { _tag: "Request" }>>()
   const notifications = new Map<string, Extract<Route, { _tag: "Notification" }>>()
@@ -121,81 +175,137 @@ export const handlers = (routes: ReadonlyArray<Route>, fallback?: Handlers): Han
 // Connection
 // -----------------------------------------------------------------------------
 
+/**
+ * Incoming dispatch and bounded request and notification capacities for a JSON-RPC connection.
+ *
+ * @category configuration
+ */
 export interface Options {
-  /** Incoming dispatch. Incoming messages wait until handlers are installed. */
+  /**
+   * Incoming dispatch. Incoming messages wait until handlers are installed.
+   */
   readonly handlers?: Handlers | undefined
-  /** Outgoing requests awaiting a response. Default 1024. */
+  /**
+   * Outgoing requests awaiting a response. Default 1024.
+   */
   readonly maxPendingRequests?: number | undefined
   /**
-   * Incoming requests (including invalid entries) whose responses are not yet
-   * written. Exceeding it terminates the connection. Default 256.
+   * Incoming requests (including invalid entries) whose responses are not yet written. Exceeding it
+   * terminates the connection. Default 256.
    */
   readonly maxIncomingRequests?: number | undefined
-  /** Notifications buffered before reading pauses. Default 256. */
+  /**
+   * Notifications buffered before reading pauses. Default 256.
+   */
   readonly notificationBuffer?: number | undefined
 }
 
+/**
+ * Local deadline for sending a request and awaiting its response.
+ *
+ * **Gotchas**
+ *
+ * A timeout does not send cancellation to the peer and cannot confirm whether remote work stopped.
+ *
+ * @category configuration
+ */
 export interface RequestOptions {
   /**
-   * Local deadline covering sending and waiting. Elapsing fails with
-   * `AcpTimeoutError`; no cancellation is sent to the peer.
+   * Local deadline covering sending and waiting. Elapsing fails with `AcpTimeoutError` ; no
+   * cancellation is sent to the peer.
    */
   readonly timeout?: Duration.Input | undefined
 }
 
-/** An outgoing request that has been written. */
+/**
+ * An outgoing request that has been written.
+ *
+ * @category models
+ */
 export interface PendingRequest {
+  /**
+   * Local request identifier retained until the peer answers or the connection closes.
+   */
   readonly id: RequestId
+  /**
+   * Wire method name of the request already sent.
+   */
   readonly method: string
   /**
-   * The raw result. Interrupting this wait only stops waiting: the request
-   * stays correlated (and counts against capacity) until answered or closed.
+   * The raw result. Interrupting this wait only stops waiting: the request stays correlated (and
+   * counts against capacity) until answered or closed.
    */
   readonly response: Effect.Effect<unknown, AcpRemoteError | AcpProtocolError | AcpConnectionClosed>
 }
 
+/**
+ * Role-neutral JSON-RPC peer with typed and raw requests, notifications, and incoming dispatch.
+ *
+ * **When to use**
+ *
+ * Use when building protocol integrations that need direct control of methods and handlers. Session
+ * lifecycle operations are available on the application client API.
+ *
+ * @category models
+ */
 export interface Service {
-  /** Sends a declared request and decodes its result. */
+  /**
+   * Sends a declared request and decodes its result.
+   */
   readonly request: <D extends RequestMethod>(
     method: D,
     params: Params<D>,
     options?: RequestOptions
   ) => Effect.Effect<Result<D>, AcpRequestError | AcpTimeoutError>
   /**
-   * Sends a raw request and waits for its raw result. A `timeout` covers both
-   * sending (which may wait on backpressure) and waiting; if it elapses before
-   * the request is sent, nothing is sent and `requestId` is null.
+   * Sends a raw request and waits for its raw result. A `timeout` covers both sending (which may
+   * wait on backpressure) and waiting; if it elapses before the request is sent, nothing is sent
+   * and `requestId` is null.
    */
   readonly requestRaw: (
     method: string,
     params?: unknown,
     options?: RequestOptions
   ) => Effect.Effect<unknown, AcpRequestError | AcpTimeoutError>
-  /** Writes a raw request and returns once it is sent. */
+  /**
+   * Writes a raw request and returns once it is sent.
+   */
   readonly send: (
     method: string,
     params?: unknown
   ) => Effect.Effect<PendingRequest, AcpConnectionClosed | AcpCapacityError | AcpProtocolError>
-  /** Sends a declared notification. */
+  /**
+   * Sends a declared notification.
+   */
   readonly notify: <D extends NotificationMethod>(
     method: D,
     params: Params<D>
   ) => Effect.Effect<void, AcpConnectionClosed | AcpProtocolError>
-  /** Sends a raw notification. */
+  /**
+   * Sends a raw notification.
+   */
   readonly notifyRaw: (method: string, params?: unknown) => Effect.Effect<void, AcpConnectionClosed | AcpProtocolError>
   /**
-   * Asks the peer to cancel an outgoing request (`$/cancel_request`). The
-   * request remains pending until the peer responds, typically with a
-   * Request cancelled error.
+   * Asks the peer to cancel an outgoing request (`$/cancel_request`). The request remains pending
+   * until the peer responds, typically with a Request cancelled error.
    */
   readonly cancelRequest: (id: RequestId) => Effect.Effect<void, AcpConnectionClosed | AcpProtocolError>
-  /** Installs or replaces incoming handlers and releases waiting incoming messages. */
+  /**
+   * Installs or replaces incoming handlers and releases waiting incoming messages.
+   */
   readonly setHandlers: (handlers: Handlers) => Effect.Effect<void>
-  /** Waits for notifications already queued to finish dispatching. Never call from a notification handler. */
+  /**
+   * Waits for notifications already queued to finish dispatching. Never call from a notification
+   * handler.
+   */
   readonly drainNotifications: Effect.Effect<void, AcpConnectionClosed>
-  /** Number of outgoing requests awaiting a response. */
+  /**
+   * Number of outgoing requests awaiting a response.
+   */
   readonly pendingRequests: Effect.Effect<number>
-  /** Completes with the terminal reason once the connection has terminated. */
+  /**
+   * Completes with the terminal reason once the connection has terminated.
+   */
   readonly closed: Effect.Effect<AcpConnectionClosed>
 }
 
@@ -203,9 +313,11 @@ const closedByTransport = (error: AcpTransportError) =>
   new AcpConnectionClosed({ message: `Transport failed: ${error.message}`, cause: error })
 
 /**
- * Starts a peer on `transport`. Closing the scope terminates the connection:
- * pending calls fail with `AcpConnectionClosed` and handler fibers are
- * interrupted. The transport itself is released by its own scope.
+ * Starts a peer on `transport` . Closing the scope terminates the connection: pending calls fail
+ * with `AcpConnectionClosed` and handler fibers are interrupted. The transport itself is released
+ * by its own scope.
+ *
+ * @category constructors
  */
 export const make = Effect.fnUntraced(function*(options: Options = {}) {
   const transport = yield* AcpTransport
@@ -324,7 +436,9 @@ export const make = Effect.fnUntraced(function*(options: Options = {}) {
       return Effect.asVoid(settleWith(deferred))
     })
 
-  /** Registers an incoming request and returns the effect producing its response. */
+  /**
+   * Registers an incoming request and returns the effect producing its response.
+   */
   const admitRequest = (id: RequestId, method: string, params: unknown): Effect.Effect<JsonRpc.Outgoing> => {
     if (active.has(id)) {
       return Effect.succeed(JsonRpc.failure(id, ErrorCode.InvalidRequest, "Duplicate request id"))
@@ -370,7 +484,9 @@ export const make = Effect.fnUntraced(function*(options: Options = {}) {
     ).pipe(Effect.ensuring(Effect.sync(() => active.delete(id))))
   }
 
-  /** Handles one message; returns the effect producing its response, if one is owed. */
+  /**
+   * Handles one message; returns the effect producing its response, if one is owed.
+   */
   const handleEntry = (entry: Schema.Json): Effect.Effect<Effect.Effect<JsonRpc.Outgoing> | undefined> =>
     Effect.suspend(() => {
       const message = JsonRpc.classify(entry)
@@ -403,7 +519,9 @@ export const make = Effect.fnUntraced(function*(options: Options = {}) {
       }
     })
 
-  /** Forks the production and writing of owed responses, bounded by `maxIncoming`. */
+  /**
+   * Forks the production and writing of owed responses, bounded by `maxIncoming`.
+   */
   const respond = (responses: ReadonlyArray<Effect.Effect<JsonRpc.Outgoing>>, batch: boolean) =>
     Effect.suspend(() => {
       if (terminated || responses.length === 0) return Effect.void
@@ -493,9 +611,17 @@ export const make = Effect.fnUntraced(function*(options: Options = {}) {
   return connection
 })
 
-/** The role-neutral JSON-RPC connection capability. */
+/**
+ * The role-neutral JSON-RPC connection capability.
+ *
+ * @category services
+ */
 export class AcpConnection extends Context.Service<AcpConnection, Service>()("effect-acp/AcpConnection") {}
 
-/** Starts a connection over the supplied scoped transport service. */
+/**
+ * Starts a connection over the supplied scoped transport service.
+ *
+ * @category layers
+ */
 export const layer = (options?: Options): Layer.Layer<AcpConnection, never, AcpTransport> =>
   Layer.effect(AcpConnection, make(options))

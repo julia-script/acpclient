@@ -1,8 +1,10 @@
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
 /**
- * ACP over the *current* process's standard input and output, for agents that
- * are launched by a client.
+ * ACP over the *current* process's standard input and output, for agents that are launched by a
+ * client.
+ *
+ * **Details**
  *
  * This is the mirror image of `transport/Stdio`, which spawns a child: here
  * the process itself is the agent, so stdin carries incoming frames and
@@ -12,7 +14,6 @@ import * as Schema from "effect/Schema"
  * The process I/O is injected through Effect's `Stdio` service (e.g. from
  * `@effect/platform-bun` or `@effect/platform-node`); importing this module
  * touches no global handles.
- *
  */
 import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
@@ -24,10 +25,19 @@ import { AcpTransportError } from "../AcpError.ts"
 import { AcpTransport, type Transport } from "../AcpTransport.ts"
 import * as Framing from "../internal/framing.ts"
 
+/**
+ * Frame size and stdout write buffering for an agent using the current process.
+ *
+ * @category configuration
+ */
 export interface Options {
-  /** Largest frame accepted or sent, in bytes, excluding the delimiter. Default 16 MiB. */
+  /**
+   * Largest frame accepted or sent, in bytes, excluding the delimiter. Default 16 MiB.
+   */
   readonly maxFrameBytes?: number | undefined
-  /** Frames queued for stdout before `send` suspends. Default 64. */
+  /**
+   * Frames queued for stdout before `send` suspends. Default 64.
+   */
   readonly writeBuffer?: number | undefined
 }
 
@@ -36,8 +46,12 @@ const closed = new AcpTransportError({ reason: "Closed", message: "Process stdou
 /**
  * A transport over this process's stdin/stdout, owned by the current scope.
  *
+ * **Details**
+ *
  * Closing the scope stops the writer and fails blocked and later writes; the
  * process handles themselves belong to the `Stdio` service.
+ *
+ * @category constructors
  */
 export const make = Effect.fnUntraced(function*(options: Options = {}) {
   const stdio = yield* Stdio.Stdio
@@ -83,7 +97,11 @@ export const make = Effect.fnUntraced(function*(options: Options = {}) {
   return transport
 })
 
-/** Writes a diagnostic line to stderr, keeping stdout free of non-protocol output. */
+/**
+ * Writes a diagnostic line to stderr, keeping stdout free of non-protocol output.
+ *
+ * @category running
+ */
 export const diagnostic = (message: string): Effect.Effect<void, never, Stdio.Stdio> =>
   Effect.flatMap(Effect.service(Stdio.Stdio), (stdio) =>
     Stream.make(`${message}\n`).pipe(
@@ -91,6 +109,10 @@ export const diagnostic = (message: string): Effect.Effect<void, never, Stdio.St
       Effect.ignore
     ))
 
-/** Process stdin/stdout implementation of AcpTransport. */
+/**
+ * Process stdin/stdout implementation of AcpTransport.
+ *
+ * @category layers
+ */
 export const layer = (options?: Options): Layer.Layer<AcpTransport, never, Stdio.Stdio> =>
   Layer.effect(AcpTransport, make(options))

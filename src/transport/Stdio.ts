@@ -2,11 +2,12 @@ import * as Schema from "effect/Schema"
 /**
  * ACP over a spawned process's standard input and output.
  *
+ * **Details**
+ *
  * Messages are UTF-8 JSON frames delimited by `\n`. Stdout carries only ACP;
  * stderr is drained independently into a bounded tail. The process runtime is
  * injected through `ChildProcessSpawner` (e.g. from `@effect/platform-node` or
  * `@effect/platform-bun`); importing this module starts nothing.
- *
  */
 import * as Cause from "effect/Cause"
 import * as Deferred from "effect/Deferred"
@@ -23,32 +24,63 @@ import { AcpTransportError } from "../AcpError.ts"
 import { AcpTransport, type Transport } from "../AcpTransport.ts"
 import * as Framing from "../internal/framing.ts"
 
+/**
+ * Frame size, write buffering, and bounded stderr diagnostics for a spawned agent process.
+ *
+ * @category configuration
+ */
 export interface Options {
-  /** Largest frame accepted or sent, in bytes, excluding the delimiter. Default 16 MiB. */
+  /**
+   * Largest frame accepted or sent, in bytes, excluding the delimiter. Default 16 MiB.
+   */
   readonly maxFrameBytes?: number | undefined
-  /** Frames queued for stdin before `send` suspends. Default 64. */
+  /**
+   * Frames queued for stdin before `send` suspends. Default 64.
+   */
   readonly writeBuffer?: number | undefined
+  /**
+   * Bounded diagnostic retention and an optional per-chunk observer.
+   */
   readonly stderr?: {
-    /** Bytes of stderr retained as the diagnostic tail. Default 64 KiB. */
+    /**
+     * Bytes of stderr retained as the diagnostic tail. Default 64 KiB.
+     */
     readonly maxBytes?: number | undefined
-    /** Observes each stderr chunk; must not block for long. */
+    /**
+     * Observes each stderr chunk; must not block for long.
+     */
     readonly onChunk?: ((chunk: Uint8Array) => Effect.Effect<void>) | undefined
   } | undefined
 }
 
+/**
+ * Scoped child-process transport with process identity, exit notification, and a retained stderr
+ * tail.
+ *
+ * @category models
+ */
 export interface StdioTransport extends Transport {
+  /**
+   * Operating-system identifier of the spawned agent process.
+   */
   readonly pid: number
-  /** Completes when the process exits. */
+  /**
+   * Completes when the process exits.
+   */
   readonly exitCode: Effect.Effect<ExitCode, PlatformError.PlatformError>
-  /** The retained stderr tail, decoded leniently. */
+  /**
+   * The retained stderr tail, decoded leniently.
+   */
   readonly stderr: Effect.Effect<string>
 }
 
 const closed = new AcpTransportError({ reason: "Closed", message: "Process stdin is closed" })
 
 /**
- * Spawns `command` in the current scope. Closing the scope fails blocked and
- * later writes, stops the readers, and terminates the process.
+ * Spawns `command` in the current scope. Closing the scope fails blocked and later writes, stops
+ * the readers, and terminates the process.
+ *
+ * @category constructors
  */
 export const make = Effect.fnUntraced(function*(command: ChildProcess.Command, options: Options = {}) {
   const scope = yield* Scope.Scope
@@ -157,7 +189,11 @@ export const make = Effect.fnUntraced(function*(command: ChildProcess.Command, o
   return transport
 })
 
-/** A scoped subprocess implementation of AcpTransport. */
+/**
+ * A scoped subprocess implementation of AcpTransport.
+ *
+ * @category layers
+ */
 export const layer = (
   command: ChildProcess.Command,
   options?: Options
