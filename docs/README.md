@@ -2,7 +2,7 @@
 
 Build agent sessions into a TypeScript application using Effect services, schemas, streams, and scopes. Connect to an ACP agent directly, reach a server-side agent from a browser, or let a host retain sessions while clients disconnect. ACP connects an application to an agent; MCP servers are tools the agent may use within those sessions.
 
-These docs assume TypeScript and basic Effect: `Effect.gen`, services, layers, and scopes. Examples import the published `effect-acp` package and use Effect **4.0.0-rc.115**. They are not Effect 3 examples. The terminal examples use Bun; the browser modules use web APIs and injected services.
+These docs assume TypeScript and basic Effect: `Effect.gen`, services, layers, and scopes. Examples import the published `effect-acp` package and use Effect **4.0.0**. They are not Effect 3 examples. The terminal examples use Bun; the browser modules use web APIs and injected services.
 
 ## Start here
 

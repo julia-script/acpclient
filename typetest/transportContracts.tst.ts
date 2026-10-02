@@ -28,7 +28,7 @@ describe("transport acquisition contracts", () => {
 
   it("retains custom acquisition errors and services", () => {
     const acquire = Effect.flatMap(Effect.service(Config), () => Effect.fail(new ConfigError({ message: "acquisition failed" })))
-    const scopedAcquire = Effect.flatMap(Scope.Scope, () => acquire)
+    const scopedAcquire = Effect.andThen(Scope.Scope, acquire)
 
     expect(AcpTransport.layer(acquire)).type.toBe<Layer.Layer<AcpTransport.AcpTransport, ConfigError, Config>>()
     expect(AcpTransport.layer(scopedAcquire)).type.toBe<Layer.Layer<AcpTransport.AcpTransport, ConfigError, Config>>()
@@ -37,7 +37,7 @@ describe("transport acquisition contracts", () => {
   it("retains effectful URL errors and services", () => {
     const url = Effect.flatMap(Effect.service(Config), (config) =>
       config.url ? Effect.succeed(config.url) : Effect.fail(new ConfigError({ message: "URL lookup failed" })))
-    const scopedUrl = Effect.flatMap(Scope.Scope, () => url)
+    const scopedUrl = Effect.andThen(Scope.Scope, url)
 
     expect(WebSocket.make(url)).type.toBe<Effect.Effect<
       AcpTransport.Transport,
