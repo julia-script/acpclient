@@ -9,7 +9,7 @@ The executables here are ACP adapters. Install them explicitly; ordinary `claude
 In your application directory:
 
 ```sh
-bun add effect-acp effect@4.0.0 @effect/platform-bun@4.0.0
+bun add effect-acp effect @effect/platform-bun
 bun add --dev @agentclientprotocol/claude-agent-acp@0.79.0 @agentclientprotocol/codex-acp@1.12.0
 ```
 
@@ -34,15 +34,14 @@ import * as Option from "effect/Option"
 import * as Stream from "effect/Stream"
 import type { SessionSnapshot } from "effect-acp/AcpApp"
 import { AcpClient } from "effect-acp/AcpClient"
-import * as AcpConnector from "effect-acp/AcpConnector"
 import * as AcpLocalClient from "effect-acp/AcpLocalClient"
 import * as Stdio from "effect-acp/transport/Stdio"
 import * as ChildProcess from "effect/process/ChildProcess"
 
 const clientLayer = (command: ChildProcess.Command) => AcpLocalClient.layer.pipe(
-  Layer.provide(AcpConnector.layer(Stdio.layer(
+  Layer.provide(Stdio.layer(
     command
-  ))),
+  )),
   Layer.provide(BunServices.layer)
 )
 

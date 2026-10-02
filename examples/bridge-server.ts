@@ -1,7 +1,6 @@
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as Argument from "effect/cli/Argument"
 import * as Command from "effect/cli/Command"
-import * as AcpConnector from "effect-acp/AcpConnector"
 import * as Schema from "effect/Schema"
 /**
  * Mount the ACP bridge on an existing HTTP server, then drive it with the
@@ -69,7 +68,6 @@ const run = (version: 1 | 2) => {
   // `disableLogger` keeps this demo's output readable: the browser hanging up is
   // a normal end of a bridged connection, not a server error.
   const Server = HttpRouter.serve(HttpRouter.addAll([bridge]), { disableLogger: true }).pipe(
-    Layer.provide(BunServices.layer),
     Layer.provide(BunHttpServer.layer({ port }))
   )
 
@@ -112,7 +110,7 @@ const run = (version: 1 | 2) => {
     yield* Effect.log("reverse permission, notifications, errors and batches relayed")
   }).pipe(
     Effect.provide(
-      AcpConnector.layer(WebSocket.layer(`ws://localhost:${port}/acp?profile=demo&token=demo-token`)).pipe(
+      WebSocket.layer(`ws://localhost:${port}/acp?profile=demo&token=demo-token`).pipe(
         // Browsers provide this global themselves.
         Layer.provide(Socket.layerWebSocketConstructorGlobal)
       )

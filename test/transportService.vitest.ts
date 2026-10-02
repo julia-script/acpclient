@@ -36,7 +36,7 @@ it.effect("a connector captures dependencies and acquires separate transport lif
     const id = yield* Effect.acquireRelease(Effect.sync(() => ++opened), (id) => Effect.sync(() => { closed.push(id) }))
     return AcpTransport.of({ incoming: Stream.never, send: (frame) => Effect.sync(() => { writes.push(`${config.label}:${id}:${frame}`) }) })
   })
-  const connectorLayer = AcpConnector.layer(Layer.effect(AcpTransport, acquire)).pipe(
+  const connectorLayer = AcpConnector.layer(acquire).pipe(
     Layer.provide(Layer.succeed(EndpointConfig, { label: "injected" }))
   )
   const connector = yield* AcpConnector.AcpConnector.pipe(Effect.provide(connectorLayer))

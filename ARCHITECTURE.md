@@ -168,8 +168,8 @@ Use `Context.Service` for injectable capabilities and `Layer` for their construc
 
 | Boundary | Effect structure | Ownership / dependencies |
 | --- | --- | --- |
-| Transport instance | `AcpTransport` service, provided by stdio/WebSocket/process-stdio/in-memory Layers | Frame reader and ordered writer |
-| Transport factory | `AcpConnector` builds a fresh transport Layer in each caller scope | Process spawner, socket constructor, or app-provided adapter |
+| Transport instance | `AcpTransport` service, provided by process-stdio, accepted-WebSocket, and in-memory Layers | Frame reader and ordered writer |
+| Transport factory | `AcpConnector`, provided by `Stdio.layer`/`WebSocket.layer`, acquires a fresh transport in each caller scope | Process spawner, socket constructor, or app-provided adapter |
 | ACP connection | Scoped value with typed request, notification, and handler operations | One transport, selected protocol adapter, pending-request registry |
 | Application client | `AcpClient` service supplied by local or remote layer | Local connector/runtime or gateway client |
 | Session handle | Value exposing Effect operations and Stream subscriptions | References an owning runtime; UI handle release does not imply remote session close |
@@ -232,7 +232,7 @@ Schema requirements:
 - Share schema-defined errors across gateway endpoints; keep local causes and secrets out of serialized failures.
 - Check schema conformance and codec round trips against the pinned upstream fixtures and representative extension payloads.
 
-`AcpTransport` is the injected service for a single scoped connection. Its implementations are `transport/Stdio.layer`, `transport/WebSocket.layer`, `transport/ProcessStdio.layer`, and `transport/InMemory.layer`. `AcpConnection.make` consumes that service; `AcpConnection.layer` exposes the JSON-RPC connection as a service. `AcpConnector.layer(transportLayer)` is a separate, lazy factory for applications opening multiple connections, building the transport Layer freshly inside each caller scope.
+`AcpTransport` is the injected service for a single scoped connection. Its Layers are `transport/ProcessStdio.layer`, `transport/WebSocket.layerSocket`, and `transport/InMemory.layer`. `AcpConnection.make` consumes that service; `AcpConnection.layer` exposes the JSON-RPC connection as a service. `AcpConnector` is a separate, lazy factory for applications opening multiple connections: `transport/Stdio.layer` and `transport/WebSocket.layer` provide it directly, and `AcpConnector.layer(acquire)` wraps a custom scoped acquisition, rerunning it inside each caller scope.
 
 The transport service exchanges framed JSON messages, including batch arrays, bidirectionally. It owns frame decoding/encoding, ordered writes, closure, and transport errors. `AcpConnection` owns envelope validation, method dispatch, request/response correlation, and ACP errors. Per-method schemas belong to protocol adapters. Invalid JSON must remain distinguishable from an invalid JSON-RPC envelope so the peer can produce the appropriate error response when the transport remains usable.
 

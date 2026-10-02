@@ -1,4 +1,3 @@
-import * as AcpConnector from "../src/AcpConnector.ts"
 import { expect, it } from "@effect/vitest"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as Effect from "effect/Effect"
@@ -18,7 +17,7 @@ const harness = Effect.gen(function*() {
     open: (_identity, _workspace, _profile, _options, enforced) => Effect.gen(function*() {
       const client = yield* AcpClient
       return yield* client.connect({ versions: [2], params: { info: { name: "test", version: "1" } }, ...enforced })
-    }).pipe(Effect.provide(Local.layer.pipe(Layer.provide(AcpConnector.layer(Stdio.layer(ChildProcess.make("bun", [new URL("./fixtures/agent.ts", import.meta.url).pathname, "2", "ignore-close"]))))))) })
+    }).pipe(Effect.provide(Local.layer.pipe(Layer.provide(Stdio.layer(ChildProcess.make("bun", [new URL("./fixtures/agent.ts", import.meta.url).pathname, "2", "ignore-close"])))))) })
   const gateway = yield* GC.fromApi(apiFor(host), { workspace: "work", storage: GC.memoryStorage() })
   const remote = yield* Remote.make(gateway, { profile: "test" })
   const connection = yield* remote.connect({ versions: [2], params: { info: { name: "test", version: "1" } } })

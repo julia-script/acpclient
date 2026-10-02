@@ -1,8 +1,6 @@
-import * as AcpConnector from "effect-acp/AcpConnector"
 /** Runnable hosted recovery example: bun examples/hosted-server.ts */
 import * as BunHttpServer from "@effect/platform-bun/BunHttpServer"
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
-import * as BunServices from "@effect/platform-bun/BunServices"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -34,7 +32,7 @@ const host = Host.layer({
     initialized++
     const client = yield* AcpClient
     return yield* client.connect({ versions: [2], params: { info: { name: "hosted-demo", version: "1" } }, ...enforced })
-  }).pipe(Effect.provide(Local.layer.pipe(Layer.provide(AcpConnector.layer(Stdio.layer(ChildProcess.make("bun", [new URL("../test/fixtures/hosted-agent.ts", import.meta.url).pathname])))))))
+  }).pipe(Effect.provide(Local.layer.pipe(Layer.provide(Stdio.layer(ChildProcess.make("bun", [new URL("../test/fixtures/hosted-agent.ts", import.meta.url).pathname]))))))
 })
 const route = GatewayHttp.route({
   // Supply your application's cookie/session authenticator here.
@@ -43,7 +41,7 @@ const route = GatewayHttp.route({
   allowOrigin: (origin) => origin === undefined || origin === `http://localhost:${port}`
 })
 const server = HttpRouter.serve(HttpRouter.addAll([route]), { disableLogger: true }).pipe(
-  Layer.provide(host), Layer.provide(BunServices.layer), Layer.provide(BunHttpServer.layer({ port })))
+  Layer.provide(host), Layer.provide(BunHttpServer.layer({ port })))
 const program = exerciseRecovery(`ws://localhost:${port}/acp/gateway?token=demo`).pipe(
   Effect.flatMap(() => initialized === 1
     ? Effect.void

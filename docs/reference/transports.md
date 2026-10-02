@@ -6,18 +6,19 @@ Scope: `AcpTransport`, `AcpConnector`, transport implementations, and `server/Br
 
 `AcpTransport.AcpTransport` is the Effect service for one live transport. Its value has `incoming: Stream<string, AcpTransportError>` and `send(frame): Effect<void, AcpTransportError>`. A frame is a complete JSON text document without its stream delimiter. The JSON-RPC peer interprets the document; the transport owns framing and I/O.
 
-`AcpConnector.layer(transportLayer)` provides a scoped factory. Each acquisition builds a fresh transport layer, so opening two connections does not reuse one process or socket through layer memoization. The factory captures dependencies such as `ChildProcessSpawner`; construction alone does not start a process.
+`AcpConnector.AcpConnector` is a scoped factory. Each `connect` reruns the transport acquisition in the caller's scope, so two connections never share one process or socket. The factory captures dependencies such as `ChildProcessSpawner`; construction alone does not start a process. `Stdio.layer` and `WebSocket.layer` provide it directly; `AcpConnector.layer(acquire)` wraps a custom `Effect<Transport, AcpTransportError, R>`.
 
-`AcpTransport.layer(acquire)` retains the acquisition Effect's error and service types. `WebSocket.make` and `WebSocket.layer` also accept a URL Effect and retain its error and service types; their socket I/O errors remain `AcpTransportError`. A connector's later `connect` call has the fixed `AcpTransportError` contract, so supply a transport layer with that error type when using `AcpConnector.layer`.
+`AcpTransport.layer(acquire)` retains the acquisition Effect's error and service types. `WebSocket.make` and `WebSocket.layer` also accept a URL Effect and retain its error and service types; socket I/O errors remain `AcpTransportError`. `WebSocket.layer` resolves the URL once, when the layer builds. A connector's `connect` call has the fixed `AcpTransportError` contract, so `AcpConnector.layer` takes an acquisition with that error type; use `AcpConnector.layer(WebSocket.make(url))` for a per-connection URL whose Effect fails only with `AcpTransportError`.
 
 ## Implementations
 
-| Module under `effect-acp/transport/` | Service constructor | Required platform service | Lifetime |
-| --- | --- | --- | --- |
-| `Stdio` | `layer(command, options?)` | `ChildProcessSpawner` | Spawned child's stdin/stdout; scope closes the transport and terminates the process. |
-| `ProcessStdio` | `layer(options?)` | Effect `Stdio` | Current process's stdin/stdout; stream handles belong to the injected service. |
-| `WebSocket` | `layer(url, options?)` | `Socket.WebSocketConstructor` | One socket, with no implicit reconnect or resend. |
-| `InMemory` | `layer(endpoint)` | None | One acquired endpoint from a paired in-memory transport. |
+| Module under `effect-acp/transport/` | Layer | Provides | Required platform service | Lifetime |
+| --- | --- | --- | --- | --- |
+| `Stdio` | `layer(command, options?)` | `AcpConnector` | `ChildProcessSpawner` | One spawned child per connection; its scope closes the transport and terminates the process. |
+| `ProcessStdio` | `layer(options?)` | `AcpTransport` | Effect `Stdio` | Current process's stdin/stdout; stream handles belong to the injected service. |
+| `WebSocket` | `layer(url, options?)` | `AcpConnector` | `Socket.WebSocketConstructor` | One socket per connection, with no implicit reconnect or resend. |
+| `WebSocket` | `layerSocket(options?)` | `AcpTransport` | `Socket.Socket` | One already-accepted socket. |
+| `InMemory` | `layer(endpoint)` | `AcpTransport` | None | One acquired endpoint from a paired in-memory transport. |
 
 The adapters also expose scoped `make` constructors for direct composition. `InMemory.make(options?)` creates `left`/`right` endpoint acquisition Effects; `makePair` acquires both. `WebSocket.fromSocket` adapts an Effect that acquires an already-upgraded `Socket`.
 

@@ -33,7 +33,6 @@ export const bridgeServer = (command: ChildProcess.Command, port = 8317) => {
       : Effect.fail(new BridgeHttp.Rejected({ message: "Unknown profile" }))
   })
   return HttpRouter.serve(HttpRouter.addAll([route])).pipe(
-    Layer.provide(BunServices.layer),
     Layer.provide(BunHttpServer.layer({ hostname: "127.0.0.1", port }))
   )
 }
@@ -88,12 +87,11 @@ import * as Effect from "effect/Effect"
 import { AcpClient } from "effect-acp/AcpClient"
 import * as Layer from "effect/Layer"
 import * as Socket from "effect/socket/Socket"
-import * as AcpConnector from "effect-acp/AcpConnector"
 import * as AcpLocalClient from "effect-acp/AcpLocalClient"
 import * as WebSocket from "effect-acp/transport/WebSocket"
 
 export const browserClient = (url: string) => AcpLocalClient.layer.pipe(
-  Layer.provide(AcpConnector.layer(WebSocket.layer(url))),
+  Layer.provide(WebSocket.layer(url)),
   Layer.provide(Socket.layerWebSocketConstructorGlobal)
 )
 

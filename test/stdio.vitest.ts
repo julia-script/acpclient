@@ -1,5 +1,4 @@
 import { AcpTransport } from "../src/AcpTransport.ts"
-import * as AcpConnector from "../src/AcpConnector.ts"
 import { failure } from "./support/failure.ts"
 import * as Json from "../src/internal/json.ts"
 import * as BunServices from "@effect/platform-bun/BunServices"
@@ -161,7 +160,7 @@ describe("spawned stdio", () => {
   it.live("the Node platform adapter composes the same way", () =>
     Effect.scoped(Effect.gen(function*() {
       const { negotiated } = yield* AcpProtocol.connect({ versions: [2, 1], params: { info: { name: "n", version: "0" }, capabilities: {} } })
-        .pipe(Effect.provide(AcpConnector.layer(Stdio.layer(stdioCommand({ version: 2 }, (yield* pidfile())))).pipe(Layer.provide(NodeServices.layer))))
+        .pipe(Effect.provide(Stdio.layer(stdioCommand({ version: 2 }, (yield* pidfile()))).pipe(Layer.provide(NodeServices.layer))))
       expect(negotiated.version).toBe(2)
     })).pipe(Effect.provide(NodeServices.layer)), 20_000)
 
