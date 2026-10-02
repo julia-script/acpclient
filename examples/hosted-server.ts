@@ -1,4 +1,3 @@
-import * as AcpConnector from "effect-acp/AcpConnector"
 /** Runnable hosted recovery example: bun examples/hosted-server.ts */
 import * as BunHttpServer from "@effect/platform-bun/BunHttpServer"
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
@@ -34,7 +33,7 @@ const host = Host.layer({
     initialized++
     const client = yield* AcpClient
     return yield* client.connect({ versions: [2], params: { info: { name: "hosted-demo", version: "1" } }, ...enforced })
-  }).pipe(Effect.provide(Local.layer.pipe(Layer.provide(AcpConnector.layer(Stdio.layer(ChildProcess.make("bun", [new URL("../test/fixtures/hosted-agent.ts", import.meta.url).pathname])))))))
+  }).pipe(Effect.provide(Local.layer.pipe(Layer.provide(Stdio.layer(ChildProcess.make("bun", [new URL("../test/fixtures/hosted-agent.ts", import.meta.url).pathname]))))))
 })
 const route = GatewayHttp.route({
   // Supply your application's cookie/session authenticator here.

@@ -2,7 +2,6 @@ import * as NodeRuntime from "@effect/platform-node/NodeRuntime"
 import * as Option from "effect/Option"
 import * as Argument from "effect/cli/Argument"
 import * as Command from "effect/cli/Command"
-import * as AcpConnector from "effect-acp/AcpConnector"
 import * as V1 from "effect-acp/protocol/v1"
 import * as Schema from "effect/Schema"
 import * as V2 from "effect-acp/protocol/v2"
@@ -49,10 +48,10 @@ import { AcpClient, AcpLocalClient, Stdio } from "effect-acp"
 // The application supplies the process runtime; the library imports none.
 const agentLayer = (command: ChildProcess.Command) => AcpLocalClient.layer.pipe(
   Layer.provide(
-    AcpConnector.layer(Stdio.layer(command, {
+    Stdio.layer(command, {
       maxFrameBytes: 8 * 1024 * 1024,
       stderr: { maxBytes: 16 * 1024 }
-    }))
+    })
   ),
   Layer.provide(NodeServices.layer)
 )

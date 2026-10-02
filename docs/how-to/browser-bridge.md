@@ -88,12 +88,11 @@ import * as Effect from "effect/Effect"
 import { AcpClient } from "effect-acp/AcpClient"
 import * as Layer from "effect/Layer"
 import * as Socket from "effect/socket/Socket"
-import * as AcpConnector from "effect-acp/AcpConnector"
 import * as AcpLocalClient from "effect-acp/AcpLocalClient"
 import * as WebSocket from "effect-acp/transport/WebSocket"
 
 export const browserClient = (url: string) => AcpLocalClient.layer.pipe(
-  Layer.provide(AcpConnector.layer(WebSocket.layer(url))),
+  Layer.provide(WebSocket.layer(url)),
   Layer.provide(Socket.layerWebSocketConstructorGlobal)
 )
 

@@ -5,14 +5,13 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as ChildProcess from "effect/process/ChildProcess"
 import { AcpClient } from "effect-acp/AcpClient"
-import * as AcpConnector from "effect-acp/AcpConnector"
 import * as AcpLocalClient from "effect-acp/AcpLocalClient"
 import * as Stdio from "effect-acp/transport/Stdio"
 
 const ClientLive = AcpLocalClient.layer.pipe(
-  Layer.provide(AcpConnector.layer(Stdio.layer(
+  Layer.provide(Stdio.layer(
     ChildProcess.make("bun", ["echo-agent.ts"], { forceKillAfter: "2 seconds" })
-  ))),
+  )),
   Layer.provide(BunServices.layer)
 )
 

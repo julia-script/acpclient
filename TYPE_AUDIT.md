@@ -14,12 +14,13 @@ protocol consumers depend on a service, and concrete transport layers provide
 that service.
 
 - `AcpTransport.AcpTransport` is a `Context.Service` for one scoped duplex
-  connection. Stdio, WebSocket, process stdio, and in-memory layers provide it.
+  connection. Process stdio, accepted-WebSocket, and in-memory layers provide it.
 - `AcpConnection.make` requires `AcpTransport`; `AcpConnection.layer` provides
   the JSON-RPC connection service. Agent serving requires the same transport.
-- `AcpConnector.layer(transportLayer)` provides a lazy factory for clients that
-  need multiple connections. It captures platform dependencies and builds a
-  fresh transport layer in each caller's scope. Tests verify separate resource
+- `AcpConnector` is a lazy factory for clients that need multiple connections.
+  `Stdio.layer` and `WebSocket.layer` provide it; `AcpConnector.layer(acquire)`
+  wraps a custom acquisition. It captures platform dependencies and reruns the
+  acquisition in each caller's scope. Tests verify separate resource
   lifetimes, dependency injection, and acquisition only on connect.
 - Bridges explicitly own two transport values, since each endpoint has its own
   acquisition and lifetime. Transport factories remain available for this use.

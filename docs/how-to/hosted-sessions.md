@@ -22,7 +22,6 @@ import * as Layer from "effect/Layer"
 import * as HttpRouter from "effect/http/HttpRouter"
 import * as ChildProcess from "effect/process/ChildProcess"
 import { AcpClient } from "effect-acp/AcpClient"
-import * as AcpConnector from "effect-acp/AcpConnector"
 import * as AcpGateway from "effect-acp/AcpGateway"
 import * as AcpHost from "effect-acp/AcpHost"
 import * as AcpLocalClient from "effect-acp/AcpLocalClient"
@@ -31,7 +30,7 @@ import * as Stdio from "effect-acp/transport/Stdio"
 
 export const hostedServer = (command: ChildProcess.Command, port = 8318) => {
   const ClientLive = AcpLocalClient.layer.pipe(
-    Layer.provide(AcpConnector.layer(Stdio.layer(command)))
+    Layer.provide(Stdio.layer(command))
   )
   const HostLive = AcpHost.layer({
     policy: {

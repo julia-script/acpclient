@@ -4,7 +4,7 @@ Scope: the application API exported by `effect-acp/AcpClient`, its local impleme
 
 ## Service composition
 
-`AcpLocalClient.layer` provides `AcpClient` and requires `AcpConnector`. `AcpConnector.layer(transportLayer)` constructs a fresh scoped transport for each connection. Platform requirements come from the supplied transport layer. `AcpClient.connect(options)` requires `Scope` and returns an initialized `AcpAgentConnection`.
+`AcpLocalClient.layer` provides `AcpClient` and requires `AcpConnector`. `Stdio.layer`, `WebSocket.layer`, or `AcpConnector.layer(acquire)` provide it and open a fresh scoped transport for each connection. Platform requirements come from that layer. `AcpClient.connect(options)` requires `Scope` and returns an initialized `AcpAgentConnection`.
 
 Connection scope owns direct session runtimes. A session handle does not extend that lifetime. A hosted attachment has a client scope, while its retained runtime belongs to the server host.
 

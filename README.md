@@ -56,14 +56,13 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as ChildProcess from "effect/process/ChildProcess"
 import { AcpClient } from "effect-acp/AcpClient"
-import * as AcpConnector from "effect-acp/AcpConnector"
 import * as AcpLocalClient from "effect-acp/AcpLocalClient"
 import * as Stdio from "effect-acp/transport/Stdio"
 
 const ClientLive = AcpLocalClient.layer.pipe(
-  Layer.provide(AcpConnector.layer(Stdio.layer(
+  Layer.provide(Stdio.layer(
     ChildProcess.make("bun", ["echo-agent.ts"], { forceKillAfter: "2 seconds" })
-  ))),
+  )),
   Layer.provide(BunServices.layer)
 )
 
@@ -131,7 +130,7 @@ Hosted retention is in memory and bounded by the host's lifetime. Read the [owne
 | --- | --- |
 | `AcpClient` | Connect to an agent and work with session handles. |
 | `AcpApp` | Schemas and types for session snapshots, submissions, and interactions. |
-| `AcpConnector` · `AcpTransport` | Open a fresh scoped transport for each connection. |
+| `AcpConnector` · `AcpTransport` | Connection factory and single scoped transport services. |
 | `transport/Stdio` · `transport/WebSocket` · `transport/InMemory` | Compose process, socket, or in-memory connections. |
 | `AcpAgent` · `agent/Store` | Define agent behavior and provide session storage. |
 | `AcpHost` · `AcpGateway` · `AcpRemoteClient` | Host sessions and attach remote clients to retained state. |

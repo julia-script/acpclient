@@ -22,6 +22,7 @@ import * as Queue from "effect/Queue"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as Socket from "effect/socket/Socket"
+import * as AcpConnector from "../AcpConnector.ts"
 import { AcpTransportError } from "../AcpError.ts"
 import { AcpTransport, type Transport } from "../AcpTransport.ts"
 
@@ -289,15 +290,23 @@ const selected = (ws: Socket.WebSocketLike): Effect.Effect<Socket.WebSocketLike,
 }
 
 /**
- * A scoped WebSocket implementation of AcpTransport.
+ * Provides an `AcpConnector` that dials a fresh socket for every connection.
+ *
+ * **Gotchas**
+ *
+ * An effectful `url` is resolved once, when the layer builds. For a per-connection URL, use
+ * `AcpConnector.layer(WebSocket.make(url))`.
  *
  * @category layers
  */
 export const layer = <E = never, R = never>(
   url: string | Effect.Effect<string, E, R>,
   options?: Options
-): Layer.Layer<AcpTransport, AcpTransportError | E, Socket.WebSocketConstructor | Exclude<R, Scope.Scope>> =>
-  Layer.effect(AcpTransport, make(url, options))
+): Layer.Layer<AcpConnector.AcpConnector, E, Socket.WebSocketConstructor | Exclude<R, Scope.Scope>> =>
+  Layer.effect(
+    AcpConnector.AcpConnector,
+    Effect.flatMap(typeof url === "string" ? Effect.succeed(url) : url, (resolved) => AcpConnector.make(make(resolved, options)))
+  )
 
 /**
  * Uses an injected accepted socket, e.g. after an HTTP upgrade.

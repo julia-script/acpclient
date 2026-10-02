@@ -13,15 +13,16 @@ import * as Cause from "effect/Cause"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
-import * as Layer from "effect/Layer"
+import type * as Layer from "effect/Layer"
 import type * as PlatformError from "effect/PlatformError"
 import * as Queue from "effect/Queue"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import type * as ChildProcess from "effect/process/ChildProcess"
 import { ChildProcessSpawner, type ExitCode } from "effect/process/ChildProcessSpawner"
+import * as AcpConnector from "../AcpConnector.ts"
 import { AcpTransportError } from "../AcpError.ts"
-import { AcpTransport, type Transport } from "../AcpTransport.ts"
+import type { Transport } from "../AcpTransport.ts"
 import * as Framing from "../internal/framing.ts"
 
 /**
@@ -190,12 +191,13 @@ export const make = Effect.fnUntraced(function*(command: ChildProcess.Command, o
 })
 
 /**
- * A scoped subprocess implementation of AcpTransport.
+ * Provides an `AcpConnector` that spawns a fresh `command` process for every connection.
+ * Building the layer starts nothing.
  *
  * @category layers
  */
 export const layer = (
   command: ChildProcess.Command,
   options?: Options
-): Layer.Layer<AcpTransport, AcpTransportError, ChildProcessSpawner> =>
-  Layer.effect(AcpTransport, make(command, options))
+): Layer.Layer<AcpConnector.AcpConnector, never, ChildProcessSpawner> =>
+  AcpConnector.layer(make(command, options))

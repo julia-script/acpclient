@@ -5,6 +5,7 @@ import * as Effect from "effect/Effect"
 import type * as Layer from "effect/Layer"
 import * as Scope from "effect/Scope"
 import type * as Socket from "effect/socket/Socket"
+import * as AcpConnector from "../src/AcpConnector.ts"
 import * as AcpTransport from "../src/AcpTransport.ts"
 import type { AcpTransportError } from "../src/AcpError.ts"
 import * as WebSocket from "../src/transport/WebSocket.ts"
@@ -45,18 +46,18 @@ describe("transport acquisition contracts", () => {
       Socket.WebSocketConstructor | Scope.Scope | Config
     >>()
     expect(WebSocket.layer(url)).type.toBe<Layer.Layer<
-      AcpTransport.AcpTransport,
-      AcpTransportError | ConfigError,
+      AcpConnector.AcpConnector,
+      ConfigError,
       Socket.WebSocketConstructor | Config
     >>()
     expect(WebSocket.layer(scopedUrl)).type.toBe<Layer.Layer<
-      AcpTransport.AcpTransport,
-      AcpTransportError | ConfigError,
+      AcpConnector.AcpConnector,
+      ConfigError,
       Socket.WebSocketConstructor | Config
     >>()
     expect(WebSocket.layer("ws://example.test")).type.toBe<Layer.Layer<
-      AcpTransport.AcpTransport,
-      AcpTransportError,
+      AcpConnector.AcpConnector,
+      never,
       Socket.WebSocketConstructor
     >>()
   })

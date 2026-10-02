@@ -30,7 +30,7 @@ const negotiate = (options: AcpProtocol.ConnectOptions, answer: (request: unknow
     const { left, right } = yield* InMemory.make()
     const agent = yield* Effect.flatMap(right, driver)
     const connecting = yield* Effect.forkChild(
-      AcpProtocol.connect(options).pipe(Effect.provide(AcpConnector.layer(Layer.effect(AcpTransport, left))))
+      AcpProtocol.connect(options).pipe(Effect.provide(AcpConnector.layer(left)))
     )
     const request = yield* agent.next
     yield* agent.send({ jsonrpc: "2.0", id: field(request, "id"), result: answer(request) })
@@ -142,7 +142,7 @@ describe("version negotiation", () => {
       Effect.gen(function*() {
         const { agent, client } = yield* TestPeer
         const connecting = yield* Effect.forkChild(AcpProtocol.connect({ params: v1Params, timeout: "1 second" }).pipe(
-          Effect.provide(AcpConnector.layer(InMemory.layer(client)))
+          Effect.provide(AcpConnector.layer(client))
         ))
         expect(yield* agent.next).toMatchObject({ method: "initialize" })
         yield* Effect.yieldNow

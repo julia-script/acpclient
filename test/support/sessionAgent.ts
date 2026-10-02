@@ -1,5 +1,4 @@
 import * as Layer from "effect/Layer"
-import { AcpTransport } from "../../src/AcpTransport.ts"
 import type * as Schema from "effect/Schema"
 import * as Json from "../../src/internal/json.ts"
 /**
@@ -167,7 +166,7 @@ export const scriptedAgent = (
       })
 
     return {
-      connector: AcpConnector.layer(Layer.effect(AcpTransport, connect)),
+      connector: AcpConnector.layer(connect),
       disconnect: Effect.suspend(() => disconnect),
       send: emit,
       update: (sessionId, update) =>

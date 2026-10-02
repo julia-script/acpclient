@@ -53,7 +53,7 @@ const program = Effect.scoped(Effect.gen(function*() {
 
   const { negotiated } = yield* AcpProtocol.connect({
     params: { clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false } }
-  }).pipe(Effect.provide(AcpConnector.layer(AcpTransport.layer(fromMessagePort(channel.port1)))))
+  }).pipe(Effect.provide(AcpConnector.layer(fromMessagePort(channel.port1))))
   yield* Effect.log(`connected over MessagePort using ACP v${negotiated.version}`)
 }))
 

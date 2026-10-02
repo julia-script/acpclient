@@ -1,4 +1,3 @@
-import { AcpTransport } from "../../src/AcpTransport.ts"
 /**
  * Ways to reach the fixture agent: in-process over paired in-memory
  * transports, or as a spawned subprocess over stdio.
@@ -61,7 +60,7 @@ export const inMemory: Compose = (options) =>
       )
       return yield* pair.left
     })
-    return { name: "in-memory", connector: AcpConnector.layer(Layer.effect(AcpTransport, connect)), released: Deferred.await(released) }
+    return { name: "in-memory", connector: AcpConnector.layer(connect), released: Deferred.await(released) }
   })
 
 const isRunning = (pid: number) => {
@@ -102,7 +101,7 @@ export const stdio: Compose = (options) =>
     const pidfile = join(yield* fs.makeTempDirectoryScoped({ prefix: "acp-agent-" }), "pid")
     return {
       name: "stdio",
-      connector: AcpConnector.layer(Stdio.layer(stdioCommand(options, pidfile))).pipe(Layer.provide(BunServices.layer)),
+      connector: Stdio.layer(stdioCommand(options, pidfile)).pipe(Layer.provide(BunServices.layer)),
       released: processGone(pidfile)
     }
   }).pipe(Effect.provide(BunServices.layer), Effect.orDie)
