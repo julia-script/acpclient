@@ -21,9 +21,9 @@ bun run build
 
 The build uses `tsconfig.build.json` to compile `src/` into `dist/`, preserving the module layout. It emits ES2022 ESM JavaScript, `.d.ts` declarations, and source/declaration maps. Relative runtime imports are rewritten from `.ts` to `.js`; Effect remains an external package dependency. Tests, examples, and vendored repositories are not emitted.
 
-Public package exports resolve the compiled files in `dist`; TypeScript resolves their adjacent declarations. Repository `tsconfig.json` path mappings let the compiler and Bun use source imports during development. The package file allowlist includes `dist` and `src` so source maps can reach their original files. `dist` is ignored by Git.
+Public package exports resolve the compiled files in `dist`, with explicit `types` conditions for their declarations. Repository `tsconfig.json` path mappings let the compiler and Bun use source imports during development. The package file allowlist includes `dist` and `src` so source maps can reach their original files. `dist` is ignored by Git. Effect is a peer dependency so applications provide the matching runtime.
 
-The `prepack` hook runs the build. Packaging additionally needs a release `version` in `package.json`; building does not assign or increment one. Run `bun run build` before running `bun run check:browser` independently; the full `check` command builds first.
+The build cleans `dist` first, and the `prepack` hook runs the build. Changesets manages the package version. Run `bun run verify:package` to test the packed package from an isolated consumer; see the [publishing guide](publishing.md) for release setup. Run `bun run build` before running `bun run check:browser` independently; the full `check` command builds first.
 
 ## Configure the editor
 

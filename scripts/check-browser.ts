@@ -81,10 +81,11 @@ const program = Effect.gen(function*() {
   }
 
   const sourceExports = Object.fromEntries(Object.entries(pkg.exports).map(([name, target]) => [
-    name, target.replace("./dist/", "./src/").replace(/\.js$/, ".ts")
+    name, target.default.replace("./dist/", "./src/").replace(/\.js$/, ".ts")
   ]))
+  const distExports = Object.fromEntries(Object.entries(pkg.exports).map(([name, target]) => [name, target.default]))
   const issues: Array<string> = []
-  for (const [surface, exports] of Object.entries({ source: sourceExports, dist: pkg.exports })) {
+  for (const [surface, exports] of Object.entries({ source: sourceExports, dist: distExports })) {
     for (const [name, target] of Object.entries(exports)) {
       const entry = path.join(dir, `${surface}_${name.replaceAll(/[^\w]/g, "_") || "root"}.ts`)
       const importPath = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.String))(path.join(root, target))
