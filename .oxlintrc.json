@@ -2,7 +2,8 @@
   "$schema": "./node_modules/@effect/tsgo/oxlint-schema.json",
   "extends": ["./node_modules/@effect/tsgo/oxlint-presets/strict.json"],
   "rules": {
-    "eslint/no-nested-ternary": "error"
+    "eslint/no-nested-ternary": "error",
+    "effecttsgo/unstable-api-usage": "off"
   },
-  "ignorePatterns": ["repos", "@repos", "node_modules", "dist", "out", "coverage"]
+  "ignorePatterns": [".scratch", "repos", "@repos", "node_modules", "dist", "out", "coverage"]
 }
