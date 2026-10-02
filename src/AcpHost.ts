@@ -1,7 +1,9 @@
 import * as Result from "effect/Result"
 import { randomUUID } from "./internal/crypto.ts"
 import * as Json from "./internal/json.ts"
-/** In-memory host ownership, recovery journal, and bounded command admission. */
+/**
+ * In-memory host ownership, recovery journal, and bounded command admission.
+ */
 import * as Cause from "effect/Cause"
 import * as Clock from "effect/Clock"
 import * as Context from "effect/Context"
@@ -19,32 +21,113 @@ import * as Semaphore from "effect/Semaphore"
 import * as Errors from "./AcpSessionError.ts"
 import * as Schema from "effect/Schema"
 
+/**
+ * Finite retention, shutdown, buffering, and capacity limits for a hosted agent runtime.
+ *
+ * **Gotchas**
+ *
+ * Every field must be a positive safe integer. Time limits are in milliseconds; byte budgets and
+ * record counts are separate limits.
+ *
+ * @category configuration
+ */
 export interface Policy {
+  /**
+   * Milliseconds to retain a detached session before owner cleanup.
+   */
   readonly retentionMs: number
+  /**
+   * Milliseconds allowed for pending user interactions.
+   */
   readonly interactionMs: number
+  /**
+   * Milliseconds allowed for cancellation confirmation and agent cleanup.
+   */
   readonly shutdownMs: number
+  /**
+   * Milliseconds an admission window remains valid for command recovery.
+   */
   readonly retryMs: number
+  /**
+   * Maximum snapshot events retained per session recovery journal.
+   */
   readonly events: number
+  /**
+   * Maximum serialized bytes retained per session recovery journal.
+   */
   readonly eventBytes: number
+  /**
+   * Maximum queued frames for a session controller before resynchronization is required.
+   */
   readonly subscriberCapacity: number
+  /**
+   * Serialized session-content budget enforced when opening agent connections.
+   */
   readonly transcriptBytes: number
+  /**
+   * Retained output-byte budget per display terminal.
+   */
   readonly terminalBytes: number
+  /**
+   * Maximum retained command records and maximum active admission windows.
+   */
   readonly commands: number
+  /**
+   * Maximum owned agent connections, including connections being opened.
+   */
   readonly connections: number
+  /**
+   * Maximum hosted sessions, including sessions being created.
+   */
   readonly sessions: number
 }
+/**
+ * Workspace, operation, and optional hosted resource identifiers passed to authorization.
+ *
+ * @category models
+ */
 export interface Access {
+  /**
+   * Workspace whose retained resources or operations are being authorized.
+   */
   readonly workspace: string
+  /**
+   * Ownership boundary being checked before the operation proceeds.
+   */
   readonly action: "open" | "read" | "attach" | "takeover" | "command"
+  /**
+   * Hosted connection identifier, when the operation addresses a connection.
+   */
   readonly connection?: string
+  /**
+   * Hosted session identifier, when the operation addresses a session.
+   */
   readonly session?: string
 }
+/**
+ * Host capacity policy and application callbacks for authorization, agent opening, and lifecycle
+ * reporting.
+ *
+ * @category configuration
+ */
 export interface Options<R = never, E = never> {
+  /**
+   * Required positive capacity and retention limits; no implicit host defaults are supplied.
+   */
   readonly policy: Policy
-  /** Application ownership checks; invoked before accessing retained data. */
+  /**
+   * Application ownership checks; invoked before accessing retained data.
+   */
   readonly authorize: (identity: AcpGateway.Identity, access: Access) => Effect.Effect<void, AcpGateway.GatewayError, R>
-  /** Resolve only authorized host profiles. Client options never select executable paths. */
+  /**
+   * Observes ownership and admission transitions; callback failures are ignored.
+   */
   readonly onLifecycle?: (event: { readonly type: "opened" | "attached" | "detached" | "expired" | "admitted" | "settled"; readonly connections: number; readonly sessions: number; readonly commands: number }) => Effect.Effect<void>
+  /**
+   * Resolves an authorized launch profile and opens it in the host-owned scope using enforced
+   * runtime limits.
+   * Client arguments describe profile options rather than selecting executable paths.
+   */
   readonly open: (identity: AcpGateway.Identity, workspace: string, profile: string, options: unknown, enforced: Pick<ConnectOptions, "interactionTimeout" | "cancelTimeout" | "limits" | "observerCapacity">) => Effect.Effect<AcpAgentConnection, import("./AcpClient.ts").ConnectError | E, R | Scope.Scope>
 }
 interface Owner {
@@ -111,6 +194,27 @@ const safe = (cause: Cause.Cause<unknown>) => {
   }
   return typeof error === "object" && error !== null && "_tag" in error && (error._tag === "AcpConnectionClosed" || error._tag === "AcpTimeoutError") ? AcpGateway.failure("OutcomeUnknown") : AcpGateway.failure("AgentFailure")
 }
+/**
+ * Creates a scoped host that owns agent connections, session attachments, and a bounded operation
+ * journal.
+ *
+ * **When to use**
+ *
+ * Use when sessions must outlive individual browser connections and commands need admission and
+ * recovery tracking.
+ *
+ * **Details**
+ *
+ * Captures callback dependencies and assigns a new host epoch. Authorization runs before retained
+ * resources are accessed.
+ *
+ * **Gotchas**
+ *
+ * State is in memory and expires according to `policy` ; restarting the host invalidates retained
+ * identifiers. Invalid policy values fail with gateway code `Invalid` .
+ *
+ * @category constructors
+ */
 export const make = <R, E>(options: Options<R, E>) => Effect.gen(function*() {
   const policy = options.policy
   for (const key of ["retentionMs", "interactionMs", "shutdownMs", "retryMs", "events", "eventBytes", "subscriberCapacity", "transcriptBytes", "terminalBytes", "commands", "connections", "sessions"] as const) {
@@ -395,6 +499,39 @@ export const make = <R, E>(options: Options<R, E>) => Effect.gen(function*() {
     yield* owner.connection.closed
   }) }
 })
+/**
+ * Host-owned connection, session, command, and attachment operations.
+ *
+ * **Details**
+ *
+ * - `epoch` identifies the current host lifetime; recovery requests must match it.
+ * - `hello` issues a principal-bound admission window after workspace authorization.
+ * - `admit` deduplicates command identities and returns their recorded state.
+ * - `operation` reads a recorded command result using its admission window.
+ * - `attach` streams a session boundary and subsequent snapshots, replaying retained events when possible.
+ * - `list` queries the agent's session listing for an authorized connection.
+ * - `closed` waits for the underlying agent connection to terminate.
+ *
+ * **Gotchas**
+ *
+ * Attachment takeover replaces the controller generation; mutations from the old controller fail.
+ * Recovery is limited by the configured journal and admission-window retention.
+ *
+ * @see {@link make} for host acquisition and policy validation.
+ * @category services
+ */
 export type Service = Effect.Success<ReturnType<typeof make>>
+/**
+ * Context service for hosted agent ownership and command admission.
+ *
+ * @category services
+ */
 export class AcpHost extends Context.Service<AcpHost, Service>()("effect-acp/AcpHost") {}
+/**
+ * Builds a scoped layer providing the hosted runtime.
+ *
+ * @see {@link make} for ownership and retention behavior.
+ *
+ * @category layers
+ */
 export const layer = <R, E>(options: Options<R, E>) => Layer.effect(AcpHost, make(options))

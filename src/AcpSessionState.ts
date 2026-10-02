@@ -7,6 +7,8 @@ import * as Json from "./internal/json.ts"
 /**
  * Pure, version-aware session state reduction.
  *
+ * **Details**
+ *
  * Every function here is synchronous and total: given a snapshot and one
  * event it returns the next snapshot. The runtime in `AcpLocalClient` owns
  * ordering, publication, and effects; keeping interpretation pure is what
@@ -17,7 +19,6 @@ import * as Json from "./internal/json.ts"
  * append. v1 has no patch/clear distinction on most families and no message
  * identities, so its adapter synthesizes local identities and marks them as
  * such rather than pretending they are durable.
- *
  */
 import type {
   ConfigOptionSnapshot,
@@ -48,9 +49,13 @@ import * as V2 from "./protocol/v2/Schema.ts"
 /**
  * Everything that can advance a session snapshot.
  *
+ * **Details**
+ *
  * Wire updates arrive as `update`; local lifecycle facts (a submission being
  * dispatched, an interaction resolving) arrive as their own events so the
  * reducer never has to guess at what the runtime did.
+ *
+ * @category models
  */
 export type Event =
   /** Raw update payload; known variants are validated before projection. */
@@ -83,6 +88,16 @@ export type Event =
 // Construction
 // -----------------------------------------------------------------------------
 
+/**
+ * Creates an empty session projection with sequence zero and unknown foreground state.
+ *
+ * **Details**
+ *
+ * The supplied working directory initializes metadata; other metadata and retained collections
+ * start empty.
+ *
+ * @category constructors
+ */
 export const empty = (
   sessionId: SessionId,
   version: SessionVersion,
@@ -696,8 +711,12 @@ const applyLimits = (snapshot: SessionSnapshot, limits: ContentLimits): SessionS
 /**
  * Applies one event, returning the next snapshot.
  *
+ * **Details**
+ *
  * `seq` advances on every applied event, so an observer can tell whether a
  * snapshot it holds predates one it is comparing against.
+ *
+ * @category transforming
  */
 export const reduce = (
   snapshot: SessionSnapshot,
@@ -827,7 +846,43 @@ const apply = (
   }
 }
 
-/** Applies a sequence of events in order. */
+/**
+ * Applies a sequence of session events in order with the same retention limits.
+ *
+ * **When to use**
+ *
+ * Use to replay recorded events or project a batch of updates without a live transport.
+ *
+ * **Details**
+ *
+ * Each event advances the snapshot sequence and applies retention limits. An empty iterable returns
+ * the supplied snapshot.
+ *
+ * **Example** (Replacing accumulated message chunks)
+ *
+ * ```ts
+ * import * as State from "effect-acp/AcpSessionState"
+ *
+ * const next = State.reduceAll(State.empty("session-1", 2), [
+ *   { _tag: "update", update: {
+ *     sessionUpdate: "agent_message_chunk", messageId: "message-1",
+ *     content: { type: "text", text: "draft" }
+ *   } },
+ *   { _tag: "update", update: {
+ *     sessionUpdate: "agent_message", messageId: "message-1",
+ *     content: [{ type: "text", text: "final" }]
+ *   } }
+ * ])
+ *
+ * // The whole-message update replaces the accumulated draft.
+ * const content = next.messages[0]?.content
+ * // content: [{ type: "text", text: "final" }]
+ * void content
+ * ```
+ *
+ * @see {@link reduce} for applying a single event.
+ * @category transforming
+ */
 export const reduceAll = (
   snapshot: SessionSnapshot,
   events: Iterable<Event>,

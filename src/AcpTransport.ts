@@ -1,12 +1,13 @@
 /**
  * Scoped duplex exchange of complete UTF-8 JSON text frames.
  *
+ * **Details**
+ *
  * A frame holds one JSON-RPC message or a batch array. Adapters own framing
  * (stdio newline delimiting, WebSocket messages, ...), ordered writes, and
  * closure; JSON parsing and envelope handling belong to `AcpConnection`.
  * Transport values are acquired in a `Scope`; closing it releases the
  * underlying resources.
- *
  */
 import * as Context from "effect/Context"
 import * as Layer from "effect/Layer"
@@ -15,24 +16,41 @@ import type * as Effect from "effect/Effect"
 import type * as Stream from "effect/Stream"
 import type { AcpTransportError } from "./AcpError.ts"
 
+/**
+ * Duplex exchange of complete JSON text frames with ordered, backpressured writes.
+ *
+ * **Details**
+ *
+ * Adapters own frame boundaries and resource cleanup. Consume `incoming` once; JSON parsing and
+ * request correlation belong to the connection layer.
+ *
+ * @category models
+ */
 export interface Transport {
   /**
-   * Inbound frames in arrival order. Consumed once. Ends when the remote side
-   * closes; fails on a read or framing error.
+   * Inbound frames in arrival order. Consumed once. Ends when the remote side closes; fails on a
+   * read or framing error.
    */
   readonly incoming: Stream.Stream<string, AcpTransportError>
   /**
-   * Writes one complete frame. Writes are ordered and never interleave. May
-   * suspend while the transport applies backpressure; fails with reason
-   * `"Closed"` once the transport is closed.
+   * Writes one complete frame. Writes are ordered and never interleave. May suspend while the
+   * transport applies backpressure; fails with reason `"Closed"` once the transport is closed.
    */
   readonly send: (frame: string) => Effect.Effect<void, AcpTransportError>
 }
 
-/** One scoped duplex connection, supplied by a concrete transport layer. */
+/**
+ * One scoped duplex connection, supplied by a concrete transport layer.
+ *
+ * @category services
+ */
 export class AcpTransport extends Context.Service<AcpTransport, Transport>()("effect-acp/AcpTransport") {}
 
-/** Builds a transport layer from a scoped adapter acquisition. */
+/**
+ * Builds a transport layer from a scoped adapter acquisition.
+ *
+ * @category layers
+ */
 export const layer = <R, E = AcpTransportError>(
   acquire: Effect.Effect<Transport, E, R>
 ): Layer.Layer<AcpTransport, E, Exclude<R, Scope.Scope>> =>

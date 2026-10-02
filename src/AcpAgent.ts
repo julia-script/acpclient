@@ -6,6 +6,8 @@ import * as Data from "effect/Data"
 /**
  * Author an ACP agent from typed Effect handlers.
  *
+ * **Details**
+ *
  * You supply implementation metadata, a version policy, and handlers; the
  * library owns the wire: version negotiation, capability advertisement,
  * request decoding, update emission, cancellation, and error mapping. Nothing
@@ -19,24 +21,6 @@ import * as Data from "effect/Data"
  *   `messageId`. Only its success permits a v2 `session/prompt` response.
  * - `prompt.execute` runs the foreground turn, emitting updates and returning
  *   a stop reason. v2 runs it *after* responding; v1's response waits for it.
- *
- * ```ts
- * import * as AcpAgent from "effect-acp/AcpAgent"
- * import * as Effect from "effect/Effect"
- *
- * const agent = AcpAgent.make({
- *   info: { name: "echo", version: "1.0.0" },
- *   versions: [2, 1],
- *   session: {
- *     create: ({ cwd }) => Effect.succeed({ sessionId: `s-${cwd.length}` })
- *   },
- *   prompt: {
- *     insert: () => Effect.succeed({ messageId: "m-1" }),
- *     execute: ({ emit }) => Effect.as(emit.agentChunk("m-1", { type: "text", text: "hi" }), "end_turn")
- *   }
- * })
- * ```
- *
  */
 import * as Cause from "effect/Cause"
 import * as DateTime from "effect/DateTime"
@@ -58,7 +42,11 @@ import type { ContentBlock, Prompt } from "./agent/Content.ts"
 import { type MessageRole, Store, StoreError } from "./agent/Store.ts"
 import * as ProcessStdio from "./transport/ProcessStdio.ts"
 
-/** The protocol version a connection negotiated. */
+/**
+ * The protocol version a connection negotiated.
+ *
+ * @category models
+ */
 export type Version = 1 | 2
 
 // -----------------------------------------------------------------------------
@@ -68,19 +56,27 @@ export type Version = 1 | 2
 /**
  * An agent's advertised capabilities do not match its installed handlers.
  *
+ * **Details**
+ *
  * Returned by {@link make} before anything is served, so a misconfigured agent
  * never accepts a connection it cannot honor.
+ *
+ * @category errors
  */
 export class AcpAgentConfigError extends Data.TaggedError("AcpAgentConfigError")<{ readonly missing: string; readonly message: string }> {
-  /** The handler or capability that is missing or inconsistent. */
+  /**
+   * The handler or capability that is missing or inconsistent.
+   */
   constructor(missing: string, message: string) {
     super({ message, missing })
   }
 }
 
 /**
- * A handler rejected an operation. `code` is sent to the client verbatim;
- * defects are *not*, and surface as a bare Internal error.
+ * A handler rejected an operation. `code` is sent to the client verbatim; defects are *not*, and
+ * surface as a bare Internal error.
+ *
+ * @category errors
  */
 export class AcpAgentError extends Data.TaggedError("AcpAgentError")<{ readonly code: number; readonly message: string; readonly data: unknown }> {
   constructor(options: { readonly code?: number; readonly message: string; readonly data?: unknown }) {
@@ -88,60 +84,93 @@ export class AcpAgentError extends Data.TaggedError("AcpAgentError")<{ readonly 
   }
 }
 
-/** Rejects the current operation with `Resource not found` for an unknown session. */
+/**
+ * Rejects the current operation with `Resource not found` for an unknown session.
+ *
+ * @category error handling
+ */
 export const unknownSession = (sessionId: string): AcpAgentError =>
   new AcpAgentError({ code: ErrorCode.ResourceNotFound, message: `Unknown session ${sessionId}` })
 
-/** Rejects the current operation with `Authentication required`. */
+/**
+ * Rejects the current operation with `Authentication required`.
+ *
+ * @category error handling
+ */
 export const authRequired = (message = "Authentication required"): AcpAgentError =>
   new AcpAgentError({ code: ErrorCode.AuthRequired, message })
 
-/** Failures an author's handler may return. */
+/**
+ * Failures an author's handler may return.
+ *
+ * @category errors
+ */
 export type HandlerError = AcpAgentError | StoreError
 
 // -----------------------------------------------------------------------------
 // Session updates
 // -----------------------------------------------------------------------------
 
-/** Terminal state of a foreground turn. */
+/**
+ * Terminal state of a foreground turn.
+ *
+ * @category models
+ */
 export type StopReason = "end_turn" | "max_tokens" | "max_turn_requests" | "refusal" | "cancelled"
 
 /**
  * Version-aware update emission for one session.
  *
+ * **Details**
+ *
  * Every method maps to the negotiated version's `session/update` shape.
  * `messageId` is required on v2 and dropped on v1, which has no message
  * identities; emitting a v2-only update on a v1 session fails rather than
  * inventing a wire shape.
+ *
+ * @category models
  */
 export interface Emit {
-  /** The negotiated version, for handlers that genuinely need to branch. */
+  /**
+   * The negotiated version, for handlers that genuinely need to branch.
+   */
   readonly version: Version
-  /** Appends a chunk to an agent message. */
+  /**
+   * Appends a chunk to an agent message.
+   */
   readonly agentChunk: (messageId: string, content: ContentBlock) => Effect.Effect<void, HandlerError>
-  /** Appends a chunk to an agent thought. */
+  /**
+   * Appends a chunk to an agent thought.
+   */
   readonly thoughtChunk: (messageId: string, content: ContentBlock) => Effect.Effect<void, HandlerError>
-  /** Appends a chunk echoing the user's message. */
+  /**
+   * Appends a chunk echoing the user's message.
+   */
   readonly userChunk: (messageId: string, content: ContentBlock) => Effect.Effect<void, HandlerError>
   /**
-   * Replaces a message's full content (v2 only). Clients reset any content
-   * they had accumulated for `messageId` before applying it.
+   * Replaces a message's full content (v2 only). Clients reset any content they had accumulated for
+   * `messageId` before applying it.
    */
   readonly message: (
     role: MessageRole,
     messageId: string,
     content: ReadonlyArray<ContentBlock>
   ) => Effect.Effect<void, HandlerError>
-  /** Sends a raw update for the negotiated version, for surfaces without a helper. */
+  /**
+   * Sends a raw update for the negotiated version, for surfaces without a helper.
+   */
   readonly raw: (update: unknown) => Effect.Effect<void, HandlerError>
 }
 
-/** Session-scoped client interactions available to `prompt.execute`. */
+/**
+ * Session-scoped client interactions available to `prompt.execute`.
+ *
+ * @category models
+ */
 export interface Interactions {
   /**
-   * Asks the client to choose a permission option, returning the selected
-   * `optionId` or `null` when the client cancelled. Runs on its own request,
-   * so other traffic keeps flowing while it waits.
+   * Asks the client to choose a permission option, returning the selected `optionId` or `null` when
+   * the client cancelled. Runs on its own request, so other traffic keeps flowing while it waits.
    */
   readonly requestPermission: (options: {
     readonly title: string
@@ -149,8 +178,8 @@ export interface Interactions {
     readonly toolCallId?: string | undefined
   }) => Effect.Effect<string | null, HandlerError>
   /**
-   * Asks the client to elicit input. Fails before sending when the client did
-   * not advertise the requested `mode`.
+   * Asks the client to elicit input. Fails before sending when the client did not advertise the
+   * requested `mode` .
    */
   readonly elicit: (request: Omit<V2.CreateElicitationRequest, "sessionId">) => Effect.Effect<V2.CreateElicitationResponse, HandlerError>
 }
@@ -159,98 +188,211 @@ export interface Interactions {
 // Handlers
 // -----------------------------------------------------------------------------
 
-/** What the client told us about itself during `initialize`. */
+/**
+ * What the client told us about itself during `initialize`.
+ *
+ * @category models
+ */
 export interface Peer {
   readonly version: Version
-  /** Client implementation metadata, when it sent any. */
+  /**
+   * Client implementation metadata, when it sent any.
+   */
   readonly info: { readonly name: string; readonly version: string } | null
-  /** Elicitation modes the client advertised. */
+  /**
+   * Elicitation modes the client advertised.
+   */
   readonly elicitation: ReadonlyArray<"form" | "url">
-  /** The decoded initialize params verbatim. */
+  /**
+   * The decoded initialize params verbatim.
+   */
   readonly raw: V1.InitializeRequest | V2.InitializeRequest
 }
 
+/**
+ * Session identity, negotiated version, and client advertisement passed to agent handlers.
+ *
+ * @category models
+ */
 export interface SessionContext {
+  /**
+   * Agent-issued session identity for the operation.
+   */
   readonly sessionId: string
+  /**
+   * Wire version selected for the current client connection.
+   */
   readonly version: Version
+  /**
+   * Client metadata and capabilities captured during initialize.
+   */
   readonly peer: Peer
 }
 
+/**
+ * Normalized workspace, MCP configuration, and client advertisement for session creation.
+ *
+ * @category models
+ */
 export interface CreateSessionRequest {
+  /**
+   * Requested absolute working directory for the new session.
+   */
   readonly cwd: string
+  /**
+   * Additional workspace directories; normalized to an empty array when absent.
+   */
   readonly additionalDirectories: ReadonlyArray<string>
+  /**
+   * Requested MCP server configurations; normalized to an empty array when absent.
+   */
   readonly mcpServers: ReadonlyArray<McpServer>
+  /**
+   * Client metadata and capabilities captured during initialize.
+   */
   readonly peer: Peer
 }
 
+/**
+ * Session context and prompt blocks passed to the insertion phase.
+ *
+ * @category models
+ */
 export interface InsertRequest extends SessionContext {
+  /**
+   * User content to record before foreground execution begins.
+   */
   readonly prompt: Prompt
 }
 
+/**
+ * Foreground execution context with the inserted message identity, update emitter, and client
+ * interactions.
+ *
+ * @category models
+ */
 export interface ExecuteRequest extends SessionContext {
+  /**
+   * User content associated with this execution.
+   */
   readonly prompt: Prompt
-  /** The message id `insert` returned for this turn. */
+  /**
+   * The message id `insert` returned for this turn.
+   */
   readonly messageId: string
+  /**
+   * Version-aware session updates and transcript retention.
+   */
   readonly emit: Emit
+  /**
+   * Permission and elicitation requests available during execution.
+   */
   readonly client: Interactions
 }
 
-/** Session lifecycle handlers. `create` is the v2 baseline requirement. */
+/**
+ * Session lifecycle handlers. `create` is the v2 baseline requirement.
+ *
+ * @category models
+ */
 export interface SessionHandlers<R = never> {
-  /** Creates a session and returns its id. Required whenever sessions are served. */
+  /**
+   * Creates a session and returns its id. Required whenever sessions are served.
+   */
   readonly create: (request: CreateSessionRequest) => Effect.Effect<{ readonly sessionId: string }, HandlerError, R>
-  /** Resumes an existing session. Advertised as `session/resume` when present. */
+  /**
+   * Resumes an existing session. Advertised as `session/resume` when present.
+   */
   readonly resume?: (
     request: SessionContext & { readonly cwd: string; readonly replayFromStart: boolean }
   ) => Effect.Effect<void, HandlerError, R>
-  /** Deletes a session. Advertised as `session.delete` when present. */
+  /**
+   * Deletes a session. Advertised as `session.delete` when present.
+   */
   readonly delete?: (request: SessionContext) => Effect.Effect<void, HandlerError, R>
-  /** Closes a session without deleting it. */
+  /**
+   * Closes a session without deleting it.
+   */
   readonly close?: (request: SessionContext) => Effect.Effect<void, HandlerError, R>
-  /** Cancels foreground work. Called after owned execution is interrupted. */
+  /**
+   * Cancels foreground work. Called after owned execution is interrupted.
+   */
   readonly cancel?: (request: SessionContext) => Effect.Effect<void, HandlerError, R>
 }
 
-/** Prompt handlers: insertion is separate from foreground execution. */
+/**
+ * Prompt handlers: insertion is separate from foreground execution.
+ *
+ * @category models
+ */
 export interface PromptHandlers<R = never> {
   /**
-   * Records the user message and returns its canonical id. On v2 its success
-   * — and only its success — produces the `session/prompt` response.
+   * Records the user message and returns its canonical id. On v2 its success — and only its success
+   * — produces the `session/prompt` response.
    */
   readonly insert: (request: InsertRequest) => Effect.Effect<{ readonly messageId: string }, HandlerError, R>
   /**
-   * Runs the foreground turn. On v2 this runs after the response, in a scope
-   * owned by the session; on v1 the response waits for its stop reason.
+   * Runs the foreground turn. On v2 this runs after the response, in a scope owned by the session;
+   * on v1 the response waits for its stop reason.
    */
   readonly execute: (request: ExecuteRequest) => Effect.Effect<StopReason, HandlerError, R>
 }
 
 /**
- * Authentication handlers. Supplying `methods` obliges you to supply both
- * `login` and `logout`: advertising methods you cannot service is rejected.
+ * Authentication handlers. Supplying `methods` obliges you to supply both `login` and `logout` :
+ * advertising methods you cannot service is rejected.
+ *
+ * @category models
  */
 export interface AuthHandlers<R = never> {
+  /**
+   * Authentication methods advertised during initialize.
+   */
   readonly methods: ReadonlyArray<{
     readonly methodId: string
     readonly name: string
     readonly type?: string | undefined
     readonly description?: string | undefined
   }>
+  /**
+   * Authenticates using the advertised method identity supplied by the client.
+   */
   readonly login?: (request: { readonly methodId: string }) => Effect.Effect<void, HandlerError, R>
+  /**
+   * Ends authentication for the current client connection.
+   */
   readonly logout?: () => Effect.Effect<void, HandlerError, R>
 }
 
+/**
+ * Agent identity, version policy, and handlers used to derive the capability advertisement.
+ *
+ * @category configuration
+ */
 export interface Options<R = never> {
-  /** Advertised implementation identity. */
+  /**
+   * Advertised implementation identity.
+   */
   readonly info: { readonly name: string; readonly version: string; readonly title?: string | undefined }
-  /** Enabled versions, highest first. Defaults to `[1]`; v2 is draft. */
+  /**
+   * Enabled versions, highest first. Defaults to `[1]`; v2 is draft.
+   */
   readonly versions?: readonly [1] | readonly [2] | readonly [2, 1] | undefined
+  /**
+   * Session lifecycle implementation used to derive advertised support.
+   */
   readonly session: SessionHandlers<R>
+  /**
+   * Separate insertion and foreground execution phases.
+   */
   readonly prompt: PromptHandlers<R>
+  /**
+   * Optional authentication methods and their required handlers.
+   */
   readonly auth?: AuthHandlers<R> | undefined
   /**
-   * `session/list` support. Omitted means the method is not advertised; the
-   * store still backs session existence checks.
+   * `session/list` support. Omitted means the method is not advertised; the store still backs
+   * session existence checks.
    */
   readonly list?: boolean | undefined
 }
@@ -286,8 +428,15 @@ const validate = <R>(options: Options<R>): AcpAgentConfigError | undefined => {
 // Agent
 // -----------------------------------------------------------------------------
 
+/**
+ * Validated agent configuration and an effect that serves one transport connection.
+ *
+ * @category models
+ */
 export interface AcpAgent<R = never> {
-  /** The validated options this agent serves. */
+  /**
+   * The validated options this agent serves.
+   */
   readonly options: Options<R>
   /**
    * Serves one client using the injected `AcpTransport` until it disconnects. Owned session work
@@ -365,9 +514,44 @@ interface SessionState {
 }
 
 /**
- * Builds an agent from handlers, validating that everything it would
- * advertise is actually installed. Configuration failures are typed; other
- * construction defects remain defects.
+ * Creates an agent after validating that its advertised capabilities have matching handlers.
+ *
+ * **Details**
+ *
+ * Construction validates configuration but does not open a transport or serve a client. Handler
+ * dependencies are supplied when serving; configuration failures use the typed error channel.
+ *
+ * **Example** (Separating insertion from execution)
+ *
+ * The insertion phase assigns the user message identity. Foreground execution emits a separate
+ * agent message. These counters are suitable for a process-local demonstration; persistent
+ * implementations should allocate durable identities.
+ *
+ * ```ts
+ * import * as AcpAgent from "effect-acp/AcpAgent"
+ * import * as Effect from "effect/Effect"
+ *
+ * let sessionNumber = 0
+ * let messageNumber = 0
+ * const agent = AcpAgent.make({
+ *   info: { name: "minimal", version: "1.0.0" },
+ *   versions: [2, 1],
+ *   session: {
+ *     create: () => Effect.sync(() => ({ sessionId: `session-${++sessionNumber}` }))
+ *   },
+ *   prompt: {
+ *     insert: () => Effect.sync(() => ({ messageId: `user-${++messageNumber}` })),
+ *     execute: ({ emit, messageId }) => Effect.as(
+ *       emit.agentChunk(`${messageId}:reply`, { type: "text", text: "hi" }),
+ *       "end_turn"
+ *     )
+ *   }
+ * })
+ * void agent
+ * ```
+ *
+ * @see {@link makeUnsafe} for synchronous construction when configuration is already trusted.
+ * @category constructors
  */
 export const make = <R = never>(options: Options<R>): Effect.Effect<AcpAgent<R>, AcpAgentConfigError> =>
   Effect.suspend(() => {
@@ -376,8 +560,19 @@ export const make = <R = never>(options: Options<R>): Effect.Effect<AcpAgent<R>,
   })
 
 /**
- * Builds an agent synchronously. Use this when the configuration is known to
- * be valid; an invalid configuration throws `AcpAgentConfigError`.
+ * Creates an agent synchronously from validated handler configuration.
+ *
+ * **When to use**
+ *
+ * Use when configuration is already trusted and construction must return an agent directly.
+ *
+ * **Gotchas**
+ *
+ * Invalid configuration throws `AcpAgentConfigError` synchronously. Construction defects also
+ * remain exceptions.
+ *
+ * @see {@link make} for construction with typed configuration failures.
+ * @category unsafe
  */
 export const makeUnsafe = <R = never>(options: Options<R>): AcpAgent<R> => {
   const invalid = validate(options)
@@ -855,8 +1050,10 @@ const build = <R>(options: Options<R>): AcpAgent<R> => {
 }
 
 /**
- * Serves this agent over the current process's stdin/stdout until the client
- * disconnects. Stdout carries only ACP frames.
+ * Serves this agent over the current process's stdin/stdout until the client disconnects. Stdout
+ * carries only ACP frames.
+ *
+ * @category running
  */
 export const serveStdio = <R>(
   agent: AcpAgent<R>,
@@ -865,8 +1062,10 @@ export const serveStdio = <R>(
   agent.serve.pipe(Effect.provide(Layer.merge(ProcessStdio.layer(options), Logger.layer([Logger.withConsoleError(Logger.formatJson)]))))
 
 /**
- * A layer that serves this agent over process stdio for the layer's lifetime.
- * Provide `Store` (e.g. `agent/Store.layer`) and a platform `Stdio`.
+ * A layer that serves this agent over process stdio for the layer's lifetime. Provide `Store` (e.g.
+ * `agent/Store.layer` ) and a platform `Stdio` .
+ *
+ * @category layers
  */
 export const layerStdio = <R>(
   agent: AcpAgent<R>,
@@ -874,7 +1073,17 @@ export const layerStdio = <R>(
 ): Layer.Layer<never, AcpTransportError, R | Store | Stdio.Stdio> =>
   Layer.effectDiscard(Effect.forkScoped(serveStdio(agent, options)))
 
+/**
+ * Version-neutral prompt and content types for agent handlers.
+ *
+ * @category re-exports
+ */
 export type { ContentBlock, Prompt } from "./agent/Content.ts"
+/**
+ * Session store service and persistence failures for agent authors.
+ *
+ * @category re-exports
+ */
 export { Store, StoreError } from "./agent/Store.ts"
 
 const messageRole = (role: "agent" | "thought" | "user") => ({ agent: "agent_message", thought: "agent_thought", user: "user_message" })[role]

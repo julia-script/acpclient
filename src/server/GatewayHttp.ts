@@ -1,5 +1,7 @@
 import * as Schema from "effect/Schema"
-/** Authenticated Effect RPC WebSocket gateway, mounted in an existing router. */
+/**
+ * Authenticated Effect RPC WebSocket gateway, mounted in an existing router.
+ */
 import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
@@ -11,11 +13,40 @@ import * as RpcSerialization from "effect/rpc/RpcSerialization"
 import * as AcpGateway from "../AcpGateway.ts"
 import { AcpHost } from "../AcpHost.ts"
 
+/**
+ * Mounted path, request authentication, and origin policy for the gateway WebSocket route.
+ *
+ * @category configuration
+ */
 export interface Options<R = never> {
+  /**
+   * GET path for WebSocket upgrades. Defaults to `/acp/gateway`.
+   */
   readonly path?: `/${string}`
+  /**
+   * Resolves the authenticated principal before upgrading; failure returns HTTP 401.
+   */
   readonly authenticate: (request: Request.HttpServerRequest) => Effect.Effect<AcpGateway.Identity, AcpGateway.GatewayError, R>
+  /**
+   * Decides whether the Origin header is allowed, including when it is absent.
+   */
   readonly allowOrigin: (origin: string | undefined) => boolean
 }
+/**
+ * Registers an authenticated WebSocket route for the hosted gateway RPC protocol.
+ *
+ * **Details**
+ *
+ * The path defaults to `/acp/gateway` . Origin denial returns HTTP 403; authentication failure
+ * returns HTTP 401. A successful `Hello` is required before other RPC methods.
+ *
+ * **Gotchas**
+ *
+ * Supply the host service and an application HTTP server. The authenticated identity is captured at
+ * upgrade time, rather than accepted from RPC payloads.
+ *
+ * @category running
+ */
 export const route = <R>(options: Options<R>) => HttpRouter.route("GET", options.path ?? "/acp/gateway", Effect.gen(function*() {
   const request = yield* Request.HttpServerRequest
   if (!options.allowOrigin(request.headers.origin)) return Response.empty({ status: 403 })

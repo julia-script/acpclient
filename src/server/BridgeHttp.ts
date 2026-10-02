@@ -1,6 +1,7 @@
 /**
- * Mountable HTTP route that bridges browser WebSocket clients to spawned stdio
- * ACP agents.
+ * Mountable HTTP route that bridges browser WebSocket clients to spawned stdio ACP agents.
+ *
+ * **Details**
  *
  * `route` adds a single `GET` upgrade route to an application-provided
  * `HttpRouter`. The application supplies authentication, an origin policy, and
@@ -20,7 +21,6 @@
  * The module imports nothing from Node/Bun or their platform packages: the
  * process runtime and HTTP server are injected as services at the server
  * boundary, and this entry point stays browser-bundle compatible.
- *
  */
 import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -37,57 +37,93 @@ import * as AcpBridge from "../AcpBridge.ts"
 import * as Stdio from "../transport/Stdio.ts"
 import * as WebSocket from "../transport/WebSocket.ts"
 
-/** The launch selection carried by a browser request, apart from the profile. */
+/**
+ * The launch selection carried by a browser request, apart from the profile.
+ *
+ * @category models
+ */
 export interface LaunchSelection {
-  /** The requested launch profile name, if any. */
+  /**
+   * The requested launch profile name, if any.
+   */
   readonly profile: string | undefined
-  /** Remaining search parameters besides `profile`. */
+  /**
+   * Remaining search parameters besides `profile`.
+   */
   readonly params: Readonly<Record<string, string | ReadonlyArray<string>>>
 }
 
-/** The route refused the request or launch before any process was created. */
+/**
+ * The route refused the request or launch before any process was created.
+ *
+ * @category errors
+ */
 export class Rejected extends Schema.TaggedError<Rejected>()("BridgeHttpRejected", {
-  /** HTTP status for the denial. Defaults to 403. */
+  /**
+   * HTTP status for the denial. Defaults to 403.
+   */
   status: Schema.optional(Schema.Finite),
-  /** Human-readable reason, sent as the response body. */
+  /**
+   * Human-readable reason, sent as the response body.
+   */
   message: Schema.String,
-  /** Which boundary refused the request: `profile`, `origin`, `auth`, or `launch`. */
+  /**
+   * Which boundary refused the request: `profile`, `origin`, `auth`, or `launch`.
+   */
   reason: Schema.optional(Schema.String)
 }, { identifier: "effect-acp/server/BridgeHttp/Rejected" }) {}
 
+/**
+ * Authentication, origin, launch-profile, and transport policies for a WebSocket-to-stdio bridge.
+ *
+ * @category configuration
+ */
 export interface Options<A, AuthR = never, LaunchR = never> {
-  /** Path to mount the upgrade route on. Default `/acp`. */
+  /**
+   * Path to mount the upgrade route on. Default `/acp`.
+   */
   readonly path?: `/${string}` | undefined
   /**
-   * Resolves the authenticated principal for an upgrade request. Its failure
-   * is reported as HTTP 401 and never spawns a process. Returning a launch
-   * error with a status overrides the denial status.
+   * Resolves the authenticated principal for an upgrade request. Its failure is reported as HTTP
+   * 401 and never spawns a process. Returning a launch error with a status overrides the denial
+   * status.
    */
   readonly authenticate: (request: HttpServerRequest.HttpServerRequest) => Effect.Effect<A, Rejected, AuthR>
   /**
-   * Origin policy applied before upgrade. Receives the `Origin` header value
-   * (`undefined` when absent) and returns whether it may connect. Required explicitly.
+   * Origin policy applied before upgrade. Receives the `Origin` header value (`undefined` when
+   * absent) and returns whether it may connect. Required explicitly.
    */
   readonly allowOrigin: (origin: string | undefined) => boolean
   /**
-   * Authorizes the browser's launch selection against the caller's allowed
-   * profiles and returns the exact command to spawn. Arbitrary browser
-   * payloads never select executable paths: the resolver maps profile names to
-   * permitted commands. Its failure is reported as HTTP 403 (or its own status)
-   * and never spawns a process.
+   * Authorizes the browser's launch selection against the caller's allowed profiles and returns the
+   * exact command to spawn. Arbitrary browser payloads never select executable paths: the resolver
+   * maps profile names to permitted commands. Its failure is reported as HTTP 403 (or its own
+   * status) and never spawns a process.
    */
   readonly resolveLaunch: (principal: A, selection: LaunchSelection) => Effect.Effect<ChildProcess.Command, Rejected, LaunchR>
-  /** Largest frame accepted on either hop, in bytes. Default 16 MiB. */
+  /**
+   * Largest frame accepted on either hop, in bytes. Default 16 MiB.
+   */
   readonly maxFrameBytes?: number | undefined
-  /** Frames buffered by the WebSocket hop before reading pauses. Default 64. */
+  /**
+   * Frames buffered by the WebSocket hop before reading pauses. Default 64.
+   */
   readonly buffer?: number | undefined
-  /** Maximum time a forward write may stay blocked. Default 10 seconds. */
+  /**
+   * Maximum time a forward write may stay blocked. Default 10 seconds.
+   */
   readonly pressureDeadline?: Duration.Input | undefined
-  /** stderr policy for the spawned peer. */
+  /**
+   * stderr policy for the spawned peer.
+   */
   readonly stderr?: { readonly maxBytes?: number } | undefined
 }
 
-/** The default mounted path. */
+/**
+ * The default mounted path.
+ *
+ * @category constants
+ */
 export const defaultPath = "/acp"
 
 const unauthorized = HttpStatus.fromLiteral("Unauthorized")
@@ -106,11 +142,12 @@ const launchSelection = (
 }
 
 /**
- * Adds the bridge upgrade route to the current `HttpRouter`. `A` is the
- * principal value `authenticate` produces and `resolveLaunch` consumes; it is
- * an ordinary value, not a service. The route requires the services used by
- * those callbacks and a `ChildProcessSpawner` when matched. Mount it with
- * `HttpRouter.addAll` on a server that provides them.
+ * Adds the bridge upgrade route to the current `HttpRouter` . `A` is the principal value
+ * `authenticate` produces and `resolveLaunch` consumes; it is an ordinary value, not a service. The
+ * route requires the services used by those callbacks and a `ChildProcessSpawner` when matched.
+ * Mount it with `HttpRouter.addAll` on a server that provides them.
+ *
+ * @category running
  */
 export const route = <A, AuthR = never, LaunchR = never>(
   options: Options<A, AuthR, LaunchR>
