@@ -10,7 +10,7 @@ You need Bun on your PATH and basic familiarity with TypeScript and Effect. Work
 mkdir first-acp-session
 cd first-acp-session
 bun init -y
-bun add effect-acp effect@4.0.0 @effect/platform-bun@4.0.0
+bun add effect-acp effect @effect/platform-bun
 ```
 
 ## 2. Save the agent

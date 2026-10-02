@@ -22,23 +22,23 @@ Connect to coding agents, build streaming chat interfaces, or expose your own ag
 ## Install
 
 ```sh
-bun add effect-acp effect@4.0.0
+bun add effect-acp effect
 ```
 
 Or with npm:
 
 ```sh
-npm install effect-acp effect@4.0.0
+npm install effect-acp effect
 ```
 
-Built for **stable Effect 4**. Effect is a peer dependency; the examples are verified with `4.0.0`. For terminal applications, add the matching platform package:
+Built for **Effect 4**, a peer dependency. For terminal applications, add the matching platform package:
 
 ```sh
 # Bun
-bun add @effect/platform-bun@4.0.0
+bun add @effect/platform-bun
 
 # Node.js
-npm install @effect/platform-node@4.0.0
+npm install @effect/platform-node
 ```
 
 Browser clients use web APIs and injected services. The package ships ESM JavaScript and TypeScript declarations, with explicit subpath exports.

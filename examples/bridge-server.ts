@@ -68,7 +68,6 @@ const run = (version: 1 | 2) => {
   // `disableLogger` keeps this demo's output readable: the browser hanging up is
   // a normal end of a bridged connection, not a server error.
   const Server = HttpRouter.serve(HttpRouter.addAll([bridge]), { disableLogger: true }).pipe(
-    Layer.provide(BunServices.layer),
     Layer.provide(BunHttpServer.layer({ port }))
   )
 

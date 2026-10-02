@@ -33,7 +33,6 @@ export const bridgeServer = (command: ChildProcess.Command, port = 8317) => {
       : Effect.fail(new BridgeHttp.Rejected({ message: "Unknown profile" }))
   })
   return HttpRouter.serve(HttpRouter.addAll([route])).pipe(
-    Layer.provide(BunServices.layer),
     Layer.provide(BunHttpServer.layer({ hostname: "127.0.0.1", port }))
   )
 }

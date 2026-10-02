@@ -4,7 +4,7 @@ Use `AcpAgent` when you want an ACP client to drive your agent. This guide assum
 
 ## Start with a working stdio agent
 
-Use [the tutorial's echo agent](../examples/echo-agent.ts) as `echo-agent.ts`. Install `effect-acp`, `effect@4.0.0`, and `@effect/platform-bun@4.0.0`. Run it through the tutorial client or configure an ACP client to launch `bun echo-agent.ts`.
+Use [the tutorial's echo agent](../examples/echo-agent.ts) as `echo-agent.ts`. Install `effect-acp`, `effect`, and `@effect/platform-bun`. Run it through the tutorial client or configure an ACP client to launch `bun echo-agent.ts`.
 
 Keep stdout reserved for ACP frames. `AcpAgent.serveStdio` provides the stdio transport and routes Effect logging to stderr. Use Effect logging or `ProcessStdio.diagnostic` for diagnostics; `console.log` or direct stdout output would corrupt the protocol.
 

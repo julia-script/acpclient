@@ -1,7 +1,6 @@
 /** Runnable hosted recovery example: bun examples/hosted-server.ts */
 import * as BunHttpServer from "@effect/platform-bun/BunHttpServer"
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
-import * as BunServices from "@effect/platform-bun/BunServices"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -42,7 +41,7 @@ const route = GatewayHttp.route({
   allowOrigin: (origin) => origin === undefined || origin === `http://localhost:${port}`
 })
 const server = HttpRouter.serve(HttpRouter.addAll([route]), { disableLogger: true }).pipe(
-  Layer.provide(host), Layer.provide(BunServices.layer), Layer.provide(BunHttpServer.layer({ port })))
+  Layer.provide(host), Layer.provide(BunHttpServer.layer({ port })))
 const program = exerciseRecovery(`ws://localhost:${port}/acp/gateway?token=demo`).pipe(
   Effect.flatMap(() => initialized === 1
     ? Effect.void

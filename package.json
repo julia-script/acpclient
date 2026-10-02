@@ -158,7 +158,7 @@
     "@changesets/cli": "^2.31.0"
   },
   "peerDependencies": {
-    "effect": "4.0.0"
+    "effect": "^4.0.0"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

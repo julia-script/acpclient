@@ -54,7 +54,6 @@ export const hostedServer = (command: ChildProcess.Command, port = 8318) => {
   })
   return HttpRouter.serve(HttpRouter.addAll([route])).pipe(
     Layer.provide(HostLive),
-    Layer.provide(BunServices.layer),
     Layer.provide(BunHttpServer.layer({ hostname: "127.0.0.1", port }))
   )
 }
