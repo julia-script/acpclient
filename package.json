@@ -3,35 +3,122 @@
   "module": "./dist/index.js",
   "type": "module",
   "exports": {
-    ".": "./dist/index.js",
-    "./AcpSchema": "./dist/AcpSchema.js",
-    "./AcpError": "./dist/AcpError.js",
-    "./AcpProtocol": "./dist/AcpProtocol.js",
-    "./AcpTransport": "./dist/AcpTransport.js",
-    "./AcpConnector": "./dist/AcpConnector.js",
-    "./AcpConnection": "./dist/AcpConnection.js",
-    "./AcpApp": "./dist/AcpApp.js",
-    "./AcpSessionError": "./dist/AcpSessionError.js",
-    "./AcpClient": "./dist/AcpClient.js",
-    "./AcpLocalClient": "./dist/AcpLocalClient.js",
-    "./AcpSessionState": "./dist/AcpSessionState.js",
-    "./AcpBridge": "./dist/AcpBridge.js",
-    "./AcpAgent": "./dist/AcpAgent.js",
-    "./agent/Store": "./dist/agent/Store.js",
-    "./agent/Content": "./dist/agent/Content.js",
-    "./protocol/v1": "./dist/protocol/v1/Schema.js",
-    "./protocol/v2": "./dist/protocol/v2/Schema.js",
-    "./transport/InMemory": "./dist/transport/InMemory.js",
-    "./transport/Stdio": "./dist/transport/Stdio.js",
-    "./transport/WebSocket": "./dist/transport/WebSocket.js",
-    "./transport/ProcessStdio": "./dist/transport/ProcessStdio.js",
-    "./server": "./dist/server/BridgeHttp.js",
-    "./AcpHost": "./dist/AcpHost.js",
-    "./AcpGateway": "./dist/AcpGateway.js",
-    "./AcpGatewayClient": "./dist/AcpGatewayClient.js",
-    "./AcpRemoteClient": "./dist/AcpRemoteClient.js",
-    "./server/GatewayHttp": "./dist/server/GatewayHttp.js",
-    "./server/BridgeHttp": "./dist/server/BridgeHttp.js"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./AcpSchema": {
+      "types": "./dist/AcpSchema.d.ts",
+      "default": "./dist/AcpSchema.js"
+    },
+    "./AcpError": {
+      "types": "./dist/AcpError.d.ts",
+      "default": "./dist/AcpError.js"
+    },
+    "./AcpProtocol": {
+      "types": "./dist/AcpProtocol.d.ts",
+      "default": "./dist/AcpProtocol.js"
+    },
+    "./AcpTransport": {
+      "types": "./dist/AcpTransport.d.ts",
+      "default": "./dist/AcpTransport.js"
+    },
+    "./AcpConnector": {
+      "types": "./dist/AcpConnector.d.ts",
+      "default": "./dist/AcpConnector.js"
+    },
+    "./AcpConnection": {
+      "types": "./dist/AcpConnection.d.ts",
+      "default": "./dist/AcpConnection.js"
+    },
+    "./AcpApp": {
+      "types": "./dist/AcpApp.d.ts",
+      "default": "./dist/AcpApp.js"
+    },
+    "./AcpSessionError": {
+      "types": "./dist/AcpSessionError.d.ts",
+      "default": "./dist/AcpSessionError.js"
+    },
+    "./AcpClient": {
+      "types": "./dist/AcpClient.d.ts",
+      "default": "./dist/AcpClient.js"
+    },
+    "./AcpLocalClient": {
+      "types": "./dist/AcpLocalClient.d.ts",
+      "default": "./dist/AcpLocalClient.js"
+    },
+    "./AcpSessionState": {
+      "types": "./dist/AcpSessionState.d.ts",
+      "default": "./dist/AcpSessionState.js"
+    },
+    "./AcpBridge": {
+      "types": "./dist/AcpBridge.d.ts",
+      "default": "./dist/AcpBridge.js"
+    },
+    "./AcpAgent": {
+      "types": "./dist/AcpAgent.d.ts",
+      "default": "./dist/AcpAgent.js"
+    },
+    "./agent/Store": {
+      "types": "./dist/agent/Store.d.ts",
+      "default": "./dist/agent/Store.js"
+    },
+    "./agent/Content": {
+      "types": "./dist/agent/Content.d.ts",
+      "default": "./dist/agent/Content.js"
+    },
+    "./protocol/v1": {
+      "types": "./dist/protocol/v1/Schema.d.ts",
+      "default": "./dist/protocol/v1/Schema.js"
+    },
+    "./protocol/v2": {
+      "types": "./dist/protocol/v2/Schema.d.ts",
+      "default": "./dist/protocol/v2/Schema.js"
+    },
+    "./transport/InMemory": {
+      "types": "./dist/transport/InMemory.d.ts",
+      "default": "./dist/transport/InMemory.js"
+    },
+    "./transport/Stdio": {
+      "types": "./dist/transport/Stdio.d.ts",
+      "default": "./dist/transport/Stdio.js"
+    },
+    "./transport/WebSocket": {
+      "types": "./dist/transport/WebSocket.d.ts",
+      "default": "./dist/transport/WebSocket.js"
+    },
+    "./transport/ProcessStdio": {
+      "types": "./dist/transport/ProcessStdio.d.ts",
+      "default": "./dist/transport/ProcessStdio.js"
+    },
+    "./server": {
+      "types": "./dist/server/BridgeHttp.d.ts",
+      "default": "./dist/server/BridgeHttp.js"
+    },
+    "./AcpHost": {
+      "types": "./dist/AcpHost.d.ts",
+      "default": "./dist/AcpHost.js"
+    },
+    "./AcpGateway": {
+      "types": "./dist/AcpGateway.d.ts",
+      "default": "./dist/AcpGateway.js"
+    },
+    "./AcpGatewayClient": {
+      "types": "./dist/AcpGatewayClient.d.ts",
+      "default": "./dist/AcpGatewayClient.js"
+    },
+    "./AcpRemoteClient": {
+      "types": "./dist/AcpRemoteClient.d.ts",
+      "default": "./dist/AcpRemoteClient.js"
+    },
+    "./server/GatewayHttp": {
+      "types": "./dist/server/GatewayHttp.d.ts",
+      "default": "./dist/server/GatewayHttp.js"
+    },
+    "./server/BridgeHttp": {
+      "types": "./dist/server/BridgeHttp.d.ts",
+      "default": "./dist/server/BridgeHttp.js"
+    }
   },
   "scripts": {
     "prepare": "effect-tsgo patch --typescript --oxlint",
@@ -46,8 +133,14 @@
     "check:browser": "bun scripts/check-browser.ts",
     "check": "bun run generate:check && bun run typecheck && bun run build && bun run lint && bun run check:docs && bun run test && bun run check:browser",
     "check:docs": "bun scripts/check-docs.ts",
-    "build": "tsc -p tsconfig.build.json",
-    "prepack": "bun run build"
+    "build": "bun run clean && tsc -p tsconfig.build.json",
+    "prepack": "bun run build",
+    "clean": "rm -rf dist",
+    "changeset": "changeset",
+    "check:changesets": "changeset status",
+    "version:packages": "changeset version && bun install --lockfile-only",
+    "verify:package": "bun run build && node scripts/verify-package.mjs",
+    "release": "bun run verify:package && changeset publish"
   },
   "devDependencies": {
     "@effect/platform-bun": "4.0.0",
@@ -61,7 +154,8 @@
     "oxlint-tsgolint": "7.0.2001",
     "tstyche": "7.2.5",
     "typescript": "7.0.2",
-    "vitest": "5.0.0"
+    "vitest": "5.0.0",
+    "@changesets/cli": "^2.31.0"
   },
   "peerDependencies": {
     "effect": "4.0.0"
@@ -71,5 +165,29 @@
   "files": [
     "dist",
     "src"
-  ]
+  ],
+  "version": "0.0.0",
+  "description": "Effect-native clients and agent authoring for the Agent Client Protocol",
+  "license": "MIT",
+  "author": "Julia Ortiz",
+  "packageManager": "bun@1.4.2",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/julia-script/acpclient.git"
+  },
+  "homepage": "https://github.com/julia-script/acpclient#readme",
+  "bugs": {
+    "url": "https://github.com/julia-script/acpclient/issues"
+  },
+  "keywords": [
+    "effect",
+    "acp",
+    "agent-client-protocol",
+    "agents",
+    "typescript"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
 }

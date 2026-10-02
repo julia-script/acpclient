@@ -25,7 +25,7 @@ describe("browser check executable", () => {
     yield* fs.makeDirectory(path.join(dir, "src"))
     yield* fs.makeDirectory(path.join(dir, "dist"))
     yield* fs.symlink(path.join(root, "node_modules"), path.join(dir, "node_modules"))
-    yield* fs.writeFileString(path.join(dir, "package.json"), '{"exports":{"./Bad":"./dist/Bad.js"}}')
+    yield* fs.writeFileString(path.join(dir, "package.json"), '{"exports":{"./Bad":{"types":"./dist/Bad.d.ts","default":"./dist/Bad.js"}}}')
     yield* fs.writeFileString(path.join(dir, "src/Bad.ts"), 'import "node:fs"\nexport const bad = true\n')
     yield* fs.writeFileString(path.join(dir, "dist/Bad.js"), 'export const good = true\n')
     yield* fs.writeFileString(path.join(dir, "scripts/check-browser.ts"), yield* fs.readFileString(path.join(root, "scripts/check-browser.ts")))
